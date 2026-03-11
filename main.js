@@ -421,6 +421,28 @@ async function createWindow() {
     }
   });
 
+  // 首次启动事件
+  gatewayGuardian.on('starting', (info) => {
+    colorLog(`⏳ ${info.message}`);
+    if (voiceSystem) {
+      voiceSystem.speak(info.message, { priority: 'normal' });
+    }
+  });
+
+  gatewayGuardian.on('first-start-success', () => {
+    colorLog('✅ Gateway 首次启动成功');
+    if (voiceSystem) {
+      voiceSystem.speak('Gateway启动成功，已准备就绪', { priority: 'normal' });
+    }
+  });
+
+  gatewayGuardian.on('first-start-failed', (info) => {
+    colorLog(`❌ Gateway 首次启动失败: ${info.error}`);
+    if (voiceSystem) {
+      voiceSystem.speak(`Gateway启动失败，${info.error}`, { priority: 'high' });
+    }
+  });
+
   // 启动守护
   gatewayGuardian.start();
 

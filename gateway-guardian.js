@@ -226,13 +226,16 @@ class GatewayGuardian extends EventEmitter {
             if (!this.isRestarting) {
                 this.isRestarting = true;
                 console.log('[Guardian] Gateway 未运行，正在首次启动...');
+                this.emit('starting', { message: '正在启动Gateway，请稍候' });
                 const result = await this.serviceManager.startGateway();
                 this.isRestarting = false;
 
                 if (result.success) {
                     console.log('[Guardian] Gateway 首次启动成功');
+                    this.emit('first-start-success');
                 } else if (!result.stillStarting) {
                     console.log(`[Guardian] Gateway 首次启动失败: ${result.error || '未知错误'}`);
+                    this.emit('first-start-failed', { error: result.error || '未知错误' });
                 }
             }
 
