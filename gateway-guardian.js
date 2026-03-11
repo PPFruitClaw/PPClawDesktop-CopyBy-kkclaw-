@@ -206,8 +206,36 @@ class GatewayGuardian extends EventEmitter {
     async _onUnhealthy() {
         this.consecutiveFailures++;
 
-        // Gateway 从未连接成功过 → 还在首次启动中，静默等待，不触发告警和重启
+        // Gateway 从未连接成功过 → 首次启动阶段
+        // 不报警、不触发 unhealthy 事件，但仍然需要尝试启动 Gateway
         if (!this._hasBeenHealthy) {
+            // 检查 gateway 进程是否仍在启动中
+            if (this.serviceManager.isGatewayStartingUp()) {
+                // 进程还活着，继续等它就绪
+                this._scheduleNext(this.baseInterval);
+                return;
+            }
+
+            // 前 2 次失败先快速重试确认（Gateway 可能还没来得及启动）
+            if (this.consecutiveFailures < 3) {
+                this._scheduleNext(this.baseInterval);
+                return;
+            }
+
+            // 连续 3 次检测不到 Gateway → 主动启动它（静默，不发告警事件）
+            if (!this.isRestarting) {
+                this.isRestarting = true;
+                console.log('[Guardian] Gateway 未运行，正在首次启动...');
+                const result = await this.serviceManager.startGateway();
+                this.isRestarting = false;
+
+                if (result.success) {
+                    console.log('[Guardian] Gateway 首次启动成功');
+                } else if (!result.stillStarting) {
+                    console.log(`[Guardian] Gateway 首次启动失败: ${result.error || '未知错误'}`);
+                }
+            }
+
             this._scheduleNext(this.baseInterval);
             return;
         }
