@@ -45,7 +45,8 @@ class PerformanceMonitor {
     start() {
         if (this.isRunning) return;
         
-        console.log('📊 性能监控系统启动');
+        const { colorLog } = require('./utils/color-log');
+        colorLog('📊 性能监控系统启动');
         this.isRunning = true;
         this.collectSample(); // 立即采样
         

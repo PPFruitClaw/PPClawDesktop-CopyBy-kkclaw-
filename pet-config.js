@@ -73,7 +73,8 @@ class PetConfig {
             const data = await fs.readFile(this.configPath, 'utf-8');
             this.config = { ...this.config, ...JSON.parse(data) };
             this._decryptSensitive(this.config);
-            console.log('✅ 配置加载成功');
+            const { colorLog } = require('./utils/color-log');
+            colorLog('✅ 配置加载成功');
         } catch (err) {
             console.log('📝 使用默认配置');
         }

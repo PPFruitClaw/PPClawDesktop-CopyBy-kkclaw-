@@ -67,10 +67,12 @@ class ServiceManager extends EventEmitter {
         this.emit('log', entry);
 
         // 控制台带颜色前缀输出
-        const colors = { info: '\x1b[32m', warn: '\x1b[33m', error: '\x1b[31m', success: '\x1b[32m' };
-        const color = colors[level] || '\x1b[37m';
+        const { c, applyColors } = require('./utils/color-log');
+        const colors = { info: c.green, warn: c.yellow, error: c.red, success: c.bGreen };
+        const color = colors[level] || c.white;
         const tag = service.startsWith('gateway') ? '[Gateway]' : '[Service]';
-        console.log(`${color}${tag}\x1b[0m ${message}`);
+        const highlighted = applyColors(message);
+        console.log(`${color}${tag}${c.reset} ${highlighted}`);
     }
 
     // 获取最近日志

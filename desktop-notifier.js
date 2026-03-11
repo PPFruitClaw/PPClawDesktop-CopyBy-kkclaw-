@@ -17,7 +17,8 @@ class DesktopNotifier extends EventEmitter {
             try {
                 await this._tryListen(tryPort);
                 this.port = tryPort;
-                console.log(`✅ 桌面通知服务器启动: http://127.0.0.1:${this.port}`);
+                const { colorLog } = require('./utils/color-log');
+                colorLog(`✅ 桌面通知服务器启动: http://127.0.0.1:${this.port}`);
                 return true;
             } catch (err) {
                 if (err.code === 'EADDRINUSE') {

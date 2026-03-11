@@ -38,14 +38,16 @@ class CacheManager {
     // 回调
     this.onCleanup = options.onCleanup || null;
     
-    console.log('🧹 缓存管理器初始化完成');
+    const { colorLog } = require('./utils/color-log');
+    colorLog('🧹 缓存管理器初始化完成');
   }
 
   /**
    * 启动自动清理
    */
   start() {
-    console.log(`🔄 启动自动清理 (间隔: ${this.cleanupInterval / 1000 / 60} 分钟)`);
+    const { colorLog: cl } = require('./utils/color-log');
+    cl(`🔄 启动自动清理 (间隔: ${this.cleanupInterval / 1000 / 60} 分钟)`);
     
     // 立即执行一次清理
     this.cleanup();

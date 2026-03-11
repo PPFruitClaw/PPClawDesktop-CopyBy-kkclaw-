@@ -10,7 +10,8 @@ class MessageSyncSystem extends EventEmitter {
     }
 
     connect() {
-        console.log('✅ 消息同步系统已启动(会话监听模式)');
+        const { colorLog } = require('./utils/color-log');
+        colorLog('✅ 消息同步系统已启动(会话监听模式)');
         this.isConnected = true;
         this.emit('connected');
     }

@@ -599,7 +599,8 @@ class ModelSwitcher {
         this.currentModel = this.models[this.currentIndex] || null;
       }
       
-      console.log(`🔄 ModelSwitcher V3: ${Object.keys(this.providers).length} providers, ${this.models.length} models, current: ${this.currentModel?.shortName || '?'}`);
+      const { colorLog } = require('./utils/color-log');
+      colorLog(`🎯 ModelSwitcher V3: ${Object.keys(this.providers).length} providers, ${this.models.length} models, current: ${this.currentModel?.shortName || '?'}`);
       this.switchLog.info('配置加载', `${Object.keys(this.providers).length} providers, ${this.models.length} models, current: ${this.currentModel?.shortName || '?'}`);
     } catch (err) {
       console.error('❌ ModelSwitcher 配置加载失败:', err.message);

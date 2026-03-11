@@ -15,7 +15,8 @@ class ScreenshotSystem {
         // 创建截图目录
         try {
             await fs.mkdir(this.screenshotDir, { recursive: true });
-            console.log('✅ 截图目录就绪:', this.screenshotDir);
+            const { colorLog } = require('./utils/color-log');
+            colorLog('📸 截图目录就绪: ' + this.screenshotDir);
         } catch (err) {
             console.error('❌ 创建截图目录失败:', err);
         }

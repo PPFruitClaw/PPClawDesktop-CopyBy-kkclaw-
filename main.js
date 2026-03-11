@@ -248,13 +248,15 @@ logRotation = new LogRotationManager({
 
 // 检查是否是自动重启
 if (process.env.RESTARTED_BY === 'auto-restart') {
-  console.log(`🔄 自动重启完成 (原因: ${process.env.RESTART_REASON})`);
+  const { colorLog: clRestart } = require('./utils/color-log');
+  clRestart(`🔄 自动重启完成 (原因: ${process.env.RESTART_REASON})`);
   performanceMonitor.incrementStat('restarts');
 }
 
 async function createWindow() {
   const pkg = require('./package.json');
-  console.log(`🦞 KKClaw v${pkg.version} | PID ${process.pid} | ${__dirname}`);
+  const { colorLog } = require('./utils/color-log');
+  colorLog(`🦞 KKClaw v${pkg.version} | PID ${process.pid} | ${__dirname}`);
 
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   
@@ -309,7 +311,7 @@ async function createWindow() {
     logDays: 30,                    // 保留30天日志
     onCleanup: (result) => {
       // 清理完成回调
-      console.log(`🧹 自动清理完成: ${result.freedMB}MB`);
+      colorLog(`🧹 自动清理完成: ${result.freedMB}MB`);
       
       // 🎙️ 智能语音播报
       if (voiceSystem && result.freedMB > 10) {
@@ -362,7 +364,7 @@ async function createWindow() {
 
   // 监听 Guardian 事件
   gatewayGuardian.on('unhealthy', (info) => {
-    console.log(`🚨 Gateway 不健康: ${info.reason}, 连续失败 ${info.consecutiveFailures} 次`);
+    colorLog(`🚨 Gateway 不健康: ${info.reason}, 连续失败 ${info.consecutiveFailures} 次`);
     if (voiceSystem) {
       voiceSystem.speak('检测到Gateway异常，正在自动恢复', { priority: 'high' });
     }
@@ -370,7 +372,7 @@ async function createWindow() {
   });
 
   gatewayGuardian.on('restarted', (info) => {
-    console.log(`✅ Gateway 已自动重启 (第 ${info.restartCount}/${info.maxRestarts} 次)`);
+    colorLog(`✅ Gateway 已自动重启 (第 ${info.restartCount}/${info.maxRestarts} 次)`);
     if (voiceSystem) {
       voiceSystem.speak('Gateway已自动重启', { priority: 'normal' });
     }
@@ -378,7 +380,7 @@ async function createWindow() {
   });
 
   gatewayGuardian.on('restart-limit-reached', (info) => {
-    console.log('❌ Gateway 重启次数过多，进入低频监控');
+    colorLog('❌ Gateway 重启次数过多，进入低频监控');
     if (voiceSystem) {
       voiceSystem.speak('Gateway频繁异常，进入低频监控', { priority: 'high' });
     }
@@ -394,7 +396,7 @@ async function createWindow() {
   });
 
   gatewayGuardian.on('restart-failed', (info) => {
-    console.log(`❌ Gateway 重启失败 (连续 ${info.consecutiveRestartFailures || '?'} 次):`, info.error);
+    colorLog(`❌ Gateway 重启失败 (连续 ${info.consecutiveRestartFailures || '?'} 次): ${info.error}`);
     workLogger.logError(`Gateway 重启失败: ${info.error}`);
 
     // 弹通知告诉用户具体原因
@@ -405,7 +407,7 @@ async function createWindow() {
   });
 
   gatewayGuardian.on('session-cleanup', (info) => {
-    console.log(`🧹 Guardian 自动清理 session: ${info.reason}`);
+    colorLog(`🧹 Guardian 自动清理 session: ${info.reason}`);
     workLogger.log('action', `Guardian 自动清理 session lock: ${info.reason}`);
     if (voiceSystem) {
       voiceSystem.speak('检测到会话锁残留，已自动清理', { priority: 'normal' });
@@ -424,7 +426,7 @@ async function createWindow() {
 
   // 监听服务状态变化
   serviceManager.on('status-change', (change) => {
-    console.log(`🔧 服务状态变化: ${change.service} ${change.previousStatus} -> ${change.currentStatus}`);
+    colorLog(`🔧 服务状态变化: ${change.service} ${change.previousStatus} -> ${change.currentStatus}`);
 
     // 更新托盘图标提示
     updateTrayTooltip();
@@ -452,7 +454,7 @@ async function createWindow() {
         setTimeout(async () => {
           try {
             await openclawClient.checkConnection();
-            console.log('✅ Gateway 重启后已重新连接');
+            colorLog('✅ Gateway 重启后已重新连接');
             workLogger.log('success', 'Gateway 重启后已重新连接');
           } catch (err) {
             console.error('重连失败:', err.message);

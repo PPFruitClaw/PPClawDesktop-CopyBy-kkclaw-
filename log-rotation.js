@@ -29,7 +29,8 @@ class LogRotationManager {
 
     // 开始自动轮转
     start() {
-        console.log('📝 日志轮转系统启动');
+        const { colorLog } = require('./utils/color-log');
+        colorLog('📝 日志轮转系统启动');
         
         // 立即执行一次
         this.rotate();

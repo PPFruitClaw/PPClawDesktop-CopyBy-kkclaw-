@@ -68,10 +68,11 @@ class SmartVoiceSystem {
                     emotion: config.minimax?.emotion || this.minimaxEmotion,
                     tempDir: this.tempDir
                 });
-                console.log('[Voice] 🎙️ MiniMax Speech 引擎已初始化');
-                console.log(`[Voice]    模型: ${config.minimax?.model || this.minimaxModel}`);
-                console.log(`[Voice]    音色: ${config.minimax?.voiceId || this.minimaxVoiceId}`);
-                console.log(`[Voice]    情绪: ${config.minimax?.emotion || this.minimaxEmotion} | 语速: ${config.minimax?.speed || 1.1}x | 音量: ${config.minimax?.vol || 3.0}`);
+                const { c } = require('./utils/color-log');
+                console.log(`[Voice] 🎙️ ${c.bGreen}${c.bold}MiniMax Speech 引擎已初始化${c.reset}`);
+                console.log(`[Voice]    模型: ${c.bCyan}${c.bold}${config.minimax?.model || this.minimaxModel}${c.reset}`);
+                console.log(`[Voice]    音色: ${c.bMagenta}${c.bold}${config.minimax?.voiceId || this.minimaxVoiceId}${c.reset}`);
+                console.log(`[Voice]    情绪: ${c.bWhite}${c.bold}${config.minimax?.emotion || this.minimaxEmotion}${c.reset} | 语速: ${c.bWhite}${c.bold}${config.minimax?.speed || 1.1}x${c.reset} | 音量: ${c.bWhite}${c.bold}${config.minimax?.vol || 3.0}${c.reset}`);
             } else {
                 console.log('[Voice] ⚠️ MiniMax API Key 未设置，回退到 Edge TTS');
                 if (this.ttsEngine === 'minimax') {
