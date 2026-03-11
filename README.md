@@ -42,9 +42,9 @@
 - 🎯 **7×24 稳定** — 自动重启、日志轮转、错误恢复
 - 🍎 **跨平台支持** — Windows 10/11 + macOS (Intel & Apple Silicon)
 
-### 🆕 v3.1.1 — 一键配置 & 个性定制
+### 🆕 v3.1.1 — 安全加固 & 模型管理升级
 
-> ⚡ **KKClaw 历史最大更新！** 全新 Setup Wizard + 语音克隆 + 人设定制 + API Key 加密
+> 🔒 **安全重点更新！** 命令注入修复 + 动态 Token 管理 + 模型热切换状态机 + Gateway 智能监控
 
 #### 🧙 Setup Wizard 配置向导（全新）
 - 🎮 **RPG 游戏风格** — 木质边框 + 羊皮纸背景 + 龙虾向导角色
@@ -703,7 +703,39 @@ node kkclaw-hotswitch.js --restart
 
 ## 📝 更新日志
 
-### [3.1.1] - 2026-02-22
+### [3.1.1] - 2026-03-11
+
+#### 🔒 安全加固
+- 🔧 **命令注入修复** — `_playAudioFile()` / `_playAudio()` / `speakWithEdgeTTS()` 全部从 `exec()` shell 拼接改为 `execFile()` / `spawn()` + 参数数组
+- 🔧 **Edge TTS 文本注入修复** — 文本通过临时文件 `--text-file` 传入，不再 inline `--text` 拼接
+- 🔧 **stop() 真正停止播放** — 跟踪当前播放进程引用，`stop()` 时 `.kill()` 终止
+- ✨ **Token 动态读取** — `openclaw-client.js` 不再模块加载时缓存 token，改用 `SecureStorage` + `configManager` 动态获取
+- ✨ **IPC 校验模块** — 新增 `ipc-validator.js`，渠道白名单校验
+- ✨ **日志脱敏** — 新增 `log-sanitizer.js`，防止敏感信息写入日志
+
+#### 🎛️ 模型管理升级
+- ✨ **模型热切换状态机** — `model-switch-state-machine.js`，状态驱动的切换流程
+- ✨ **切换策略模式** — `model-switch-strategies.js`，可扩展的切换策略
+- ✨ **切换历史记录** — `switch-history.js`，追踪模型切换轨迹
+- ✨ **额度查询** — `quota-query.js`，查询 API 余额
+- ✨ **CC Switch 同步** — `cc-switch-sync.js`，Claude Code 模型同步切换
+
+#### 🛡️ Gateway 智能监控
+- ✨ **异常检测器** — `gateway-anomaly-detector.js`，自动识别异常模式
+- ✨ **健康评分** — `gateway-health-scorer.js`，多维度健康度量化
+- ✨ **指标采集器** — `gateway-metrics-collector.js`，实时采集 Gateway 指标
+- ✨ **智能检测器** — `gateway-smart-detector.js`，智能故障诊断
+
+#### 🏗️ 架构优化
+- ✨ **路径解析器** — `openclaw-path-resolver.js`，消除硬编码路径
+- ✨ **安全配置加载** — `safe-config-loader.js`，带校验的配置读��
+- ✨ **安全存储** — `secure-storage.js`，token 安全管理
+- ✨ **会话锁管理器** — `session-lock-manager.js`，并发安全的会话操作
+- ✨ **配置管理器** — `config-manager.js` + `config-writer.js`，统一配置读写
+- ✨ **Setup Wizard 独立 preload** — `setup-preload.js`，最小化权限暴露
+- ✨ **Model Settings 分离** — CSS/JS 从 HTML 中独立为 `model-settings.css` + `model-settings.js`
+
+### [3.0.0] - 2026-02-22
 
 #### 🧙 Setup Wizard — 一键配置向导（全新）
 - ✨ **RPG 游戏风格引导界面** — 木质边框 + 羊皮纸背景 + 龙虾向导 + 打字机文字效果
@@ -886,37 +918,33 @@ A **different kind** of desktop AI assistant:
 
 ### 🆕 What's New in v3.1.1
 
-> ⚡ **Biggest update ever!** Setup Wizard + Voice Cloning + Persona Customization + API Key Encryption
+> 🔒 **Security-focused update!** Command injection fixes + dynamic token management + model hot-swap state machine + smart gateway monitoring
 
-#### 🧙 Setup Wizard (New)
-- 🎮 **RPG Game Style** — Wooden frame + parchment background + lobster guide character
-- 📋 **7-Step Flow** — Gateway → Model → Channels → TTS → Agent Voice → Display → Full Test
-- 🎤 **One-Click Voice Clone** — Upload 30s recording, auto-clone via MiniMax/CosyVoice API
-- 🎭 **Persona System** — 5 preset styles (Sweet/Professional/Funny/Cool/Custom)
-- 📝 **Full Agent Config Generation** — Auto-creates `AGENTS.md` + `SOUL.md` + `USER.md` + `HEARTBEAT.md` + `desktop-bridge.js`
-- ✅ **7-Item Full Chain Test** — Gateway / Model / TTS / Voice Broadcast / Lyrics / Agent Files / Voice Clone
+#### 🔒 Security Hardening
+- 🔧 **Command injection fix** — `_playAudioFile()` / `_playAudio()` / `speakWithEdgeTTS()` replaced `exec()` shell interpolation with `execFile()` / `spawn()` + argument arrays
+- 🔧 **Edge TTS injection fix** — Text passed via temp file (`--text-file`) instead of inline `--text`
+- 🔧 **stop() actually stops playback** — Tracks current process ref, kills it on `stop()`
+- ✨ **Dynamic token loading** — `openclaw-client.js` reads token on each request via `SecureStorage` + `configManager`
+- ✨ **IPC validator** — New `ipc-validator.js` for channel whitelist validation
+- ✨ **Log sanitizer** — New `log-sanitizer.js` to prevent sensitive data leaking to logs
 
-#### 🌈 Emotion System Upgrade
-- 🌈 **7 → 14 Emotions** — Added sad, angry, fearful, calm, excited, love, focused
-- ✨ **Dynamic Glow Effects** — Each emotion has its own outer glow
-- 🎭 **Text Emotion Detection** — Auto-analyzes content mood with 10 matching rules
+#### 🎛️ Model Management Upgrades
+- ✨ **Model switch state machine** — State-driven switching flow
+- ✨ **Switch strategy pattern** — Extensible switching strategies
+- ✨ **Switch history** — Track model switch history
+- ✨ **Quota query** — API balance queries
 
-#### 🔐 Security & Stability
-- 🔑 **Encrypted API Keys** — `safeStorage` encryption for MiniMax/DashScope keys
-- 🔒 **Preload Security Sandbox** — All windows use IPC whitelist validation via `preload.js`
-- 🎵 **Lyrics Window Ready Guard** — Prevents crash when lyrics window hasn't loaded
-- 📡 **Port Persistence** — Notification port saved to config for dynamic lookup
-- 📡 **Renderer Error Forwarding** — `preload-error` + `console-message` forwarded to main process logs
+#### 🛡️ Smart Gateway Monitoring
+- ✨ **Anomaly detector** — Auto-identify abnormal patterns
+- ✨ **Health scorer** — Multi-dimensional health quantification
+- ✨ **Metrics collector** — Real-time gateway metrics
+- ✨ **Smart detector** — Intelligent fault diagnosis
 
-#### 🩺 Diagnostics & Ops
-- 🆕 **Doctor Self-Check** — 10-item auto-diagnosis (Gateway / Tray / TTS / API Keys / Model / Port / Health / Cache / Lyrics / Logs), each with fix suggestions
-- 🆕 **Session Refresh** — One-click cleanup for corrupted sessions
-- 🔧 **Diagnostics UI Upgrade** — Doctor panel with summary stats + fix recommendations
-
-#### 🎛️ Model Management Upgrade
-- 🆕 **Latency Testing** — Single model + batch speed test
-- 🆕 **Provider CRUD** — Add/edit/delete providers with baseUrl and API key
-- 🆕 **Model Add/Remove** — Manage models within each provider
+#### 🏗️ Architecture
+- ✨ **Path resolver** — Eliminates hardcoded paths
+- ✨ **Session lock manager** — Concurrent-safe session operations
+- ✨ **Config manager** — Unified config read/write
+- ✨ **Model Settings separation** — CSS/JS extracted from HTML
 - 🆕 **Preset Templates** — Built-in mainstream provider presets for quick setup
 
 #### 🎙️ Voice Enhancements
