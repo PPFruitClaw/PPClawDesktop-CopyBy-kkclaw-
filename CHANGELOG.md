@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project loosely follows semantic versioning.
 
 
-## [3.0.0] - 2026-02-22
+## [3.1.1] - 2026-02-22
 
 ### 🎤 Setup Wizard Voice Configuration Improvements
 

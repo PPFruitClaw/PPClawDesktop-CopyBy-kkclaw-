@@ -16,7 +16,7 @@
 
 *OpenClaw Core + Desktop Embodiment = A living interface with emotion, voice, and presence*
 
-[![Version](https://img.shields.io/badge/version-3.0.0-FF6B4A?style=for-the-badge&logo=github)](https://github.com/kk43994/kkclaw/releases)
+[![Version](https://img.shields.io/badge/version-3.1.1-FF6B4A?style=for-the-badge&logo=github)](https://github.com/kk43994/kkclaw/releases)
 [![Updated](https://img.shields.io/badge/updated-2026--02--22-34D399?style=for-the-badge)](https://github.com/kk43994/kkclaw)
 [![Build](https://img.shields.io/github/actions/workflow/status/kk43994/kkclaw/build-release.yml?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/kk43994/kkclaw/actions)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
@@ -42,7 +42,7 @@
 - 🎯 **7×24 稳定** — 自动重启、日志轮转、错误恢复
 - 🍎 **跨平台支持** — Windows 10/11 + macOS (Intel & Apple Silicon)
 
-### 🆕 v3.0.0 — 一键配置 & 个性定制
+### 🆕 v3.1.1 — 一键配置 & 个性定制
 
 > ⚡ **KKClaw 历史最大更新！** 全新 Setup Wizard + 语音克隆 + 人设定制 + API Key 加密
 
@@ -126,15 +126,15 @@
 
 ## 📦 下载安装
 
-### 最新版本：v3.0.0
+### 最新版本：v3.1.1
 
 <div align="center">
 
 | 平台 | 架构 | 下载链接 | 大小 |
 |------|------|----------|------|
-| 🪟 **Windows** | x64 | [KKClaw-Desktop-Pet-3.0.0-Setup.exe](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-Setup.exe) | ~150MB |
-| 🍎 **macOS** | Intel | [KKClaw-Desktop-Pet-3.0.0-x64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-x64.dmg) | ~160MB |
-| 🍎 **macOS** | Apple Silicon | [KKClaw-Desktop-Pet-3.0.0-arm64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-arm64.dmg) | ~160MB |
+| 🪟 **Windows** | x64 | [KKClaw-Desktop-Pet-3.1.1-Setup.exe](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-Setup.exe) | ~150MB |
+| 🍎 **macOS** | Intel | [KKClaw-Desktop-Pet-3.1.1-x64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-x64.dmg) | ~160MB |
+| 🍎 **macOS** | Apple Silicon | [KKClaw-Desktop-Pet-3.1.1-arm64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-arm64.dmg) | ~160MB |
 
 [📦 查看所有版本](https://github.com/kk43994/kkclaw/releases) | [🎥 在线演示](https://kk43994.github.io/kkclaw/)
 
@@ -703,7 +703,7 @@ node kkclaw-hotswitch.js --restart
 
 ## 📝 更新日志
 
-### [3.0.0] - 2026-02-22
+### [3.1.1] - 2026-02-22
 
 #### 🧙 Setup Wizard — 一键配置向导（全新）
 - ✨ **RPG 游戏风格引导界面** — 木质边框 + 羊皮纸背景 + 龙虾向导 + 打字机文字效果
@@ -862,7 +862,7 @@ node kkclaw-hotswitch.js --restart
 
 ![Hero Banner](docs/images/hero-banner.png)
 
-[![Version](https://img.shields.io/badge/version-3.0.0-FF6B4A?style=for-the-badge&logo=github)](https://github.com/kk43994/kkclaw/releases)
+[![Version](https://img.shields.io/badge/version-3.1.1-FF6B4A?style=for-the-badge&logo=github)](https://github.com/kk43994/kkclaw/releases)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows_|_macOS-0078D6?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kk43994/kkclaw)
 
@@ -884,7 +884,7 @@ A **different kind** of desktop AI assistant:
 - 🎯 **7×24 Stable** — Auto-restart, log rotation, error recovery
 - 🍎 **Cross-Platform** — Windows 10/11 + macOS (Intel & Apple Silicon)
 
-### 🆕 What's New in v3.0.0
+### 🆕 What's New in v3.1.1
 
 > ⚡ **Biggest update ever!** Setup Wizard + Voice Cloning + Persona Customization + API Key Encryption
 
@@ -956,9 +956,9 @@ npm start
 
 | Platform | Arch | Download | Size |
 |----------|------|----------|------|
-| 🪟 **Windows** | x64 | [Setup.exe](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-Setup.exe) | ~150MB |
-| 🍎 **macOS** | Intel | [x64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-x64.dmg) | ~160MB |
-| 🍎 **macOS** | Apple Silicon | [arm64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-arm64.dmg) | ~160MB |
+| 🪟 **Windows** | x64 | [Setup.exe](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-Setup.exe) | ~150MB |
+| 🍎 **macOS** | Intel | [x64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-x64.dmg) | ~160MB |
+| 🍎 **macOS** | Apple Silicon | [arm64.dmg](https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-arm64.dmg) | ~160MB |
 
 [📦 All Releases](https://github.com/kk43994/kkclaw/releases)
 

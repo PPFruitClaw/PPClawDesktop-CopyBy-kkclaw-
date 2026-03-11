@@ -1,7 +1,7 @@
 ﻿---
 name: kkclaw
 description: 给你的 AI Agent 一个桌面身体 — Setup Wizard、14情绪球体、语音克隆、歌词窗、Doctor 自检、跨平台支持（Windows + macOS）
-version: 3.0.0
+version: 3.1.1
 author: xiao-k-assistant
 tags: [desktop-pet, electron, tts, voice, emotion, openclaw, visualization, cross-platform]
 ---
@@ -42,9 +42,9 @@ npm start
 ```
 
 或下载安装包：
-- **Windows:** https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-Setup.exe
-- **macOS (Intel):** https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-x64.dmg
-- **macOS (Apple Silicon):** https://github.com/kk43994/kkclaw/releases/download/v3.0.0/KKClaw-Desktop-Pet-3.0.0-arm64.dmg
+- **Windows:** https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-Setup.exe
+- **macOS (Intel):** https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-x64.dmg
+- **macOS (Apple Silicon):** https://github.com/kk43994/kkclaw/releases/download/v3.1.1/KKClaw-Desktop-Pet-3.1.1-arm64.dmg
 
 ## 配置
 
@@ -78,5 +78,5 @@ kkclaw/
 - GitHub: https://github.com/kk43994/kkclaw
 - Landing Page: https://kk43994.github.io/kkclaw/
 - ClawHub: https://clawhub.ai/kk43994/desktop-pet
-- 版本: v3.0.0
+- 版本: v3.1.1
 
