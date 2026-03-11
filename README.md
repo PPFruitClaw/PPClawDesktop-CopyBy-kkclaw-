@@ -41,93 +41,99 @@
 
 | 功能 | 说明 |
 |------|------|
-| 🔮 **会呼吸的小球** | 67px 琉璃球体，内部液体一直在流动，看起来像活的一样（3层流体动画 + 径向渐变 + 双重高光） |
-| 🌈 **14种心情颜色** | 开心是暖橙色、伤心是天蓝色、生气是火红色…每种心情自动切换颜色和光晕（14-emotion glow system） |
-| 👀 **38种小表情** | 不操作的时候也会自己眨眼、歪头、偷瞄、打盹、星星眼、装死…像真的有脾气（idle micro-expression engine） |
-| 🕐 **看时间变表情** | 早上精神、下午犯困、深夜打哈欠，它知道现在几点（时间场景感知：morning / noon / afternoon / evening / latenight） |
-| 🖱️ **眼睛跟着鼠标转** | 你移动鼠标，球体的眼睛会跟着光标方向看（mouse tracking） |
-| 💗 **害羞会脸红** | 触发特定表情时，脸颊两边会浮现粉色红晕（dynamic blush overlay） |
-| 🫧 **身边有小气泡** | 球体周围飘着半透明的小泡泡，增加灵动感（bubble particle decoration） |
-| ✨ **点击有弹跳反馈** | 点球体会弹一下 + 颜色闪���下，有手感（squish animation + color pulse） |
-| 🎈 **悬浮呼吸效果** | 球体会微微上下浮动，像在水面漂浮（60fps float + breath scaling） |
+| 🔮 **流体玻璃球** | 67px 琉璃质感球体，内部液体持续流动，宛如活物（3层流体动画 + 径向渐变 + 双重高光） |
+| 🌈 **14种心情变色** | 开心暖橙、伤心天蓝、生气火红……每种情绪对应独立颜色与光晕效果（14-emotion glow system） |
+| 👀 **38种待机微表情** | 待机时自动播放眨眼、歪头、偷瞄、打盹、星星眼、装死等表情，营造鲜活性格感（idle micro-expression engine） |
+| 🕐 **时间感知表情** | 早晨活力、午后困倦、深夜哈欠——自动感知当前时段并切换表情（时间场景感知：morning / noon / afternoon / evening / latenight） |
+| 🖱️ **鼠标跟踪眼神** | 球体眼睛跟随光标方向转动，增强互动感（mouse tracking） |
+| 💗 **害羞脸红** | 特定表情触发时，脸颊浮现粉色红晕（dynamic blush overlay） |
+| 🫧 **气泡装饰粒子** | 球体周围飘浮半透明气泡，增添灵动氛围（bubble particle decoration） |
+| ✨ **点击弹跳反馈** | 点击球体产生弹性压缩 + 颜色脉冲，操作有手感（squish animation + color pulse） |
+| 🎈 **悬浮呼吸效果** | 球体微幅上下浮动，如同水面漂浮（60fps float + breath scaling） |
 
 ### 🎙️ 声音 & 语音
 
 | 功能 | 说明 |
 |------|------|
-| 🎤 **30秒克隆你的声音** | 上传一段30秒录音，AI就能用你的声音说话（MiniMax Voice Cloning API） |
-| 🗣️ **14种语气自动切换** | 说开心的事用欢快声、说难过的事用低沉声，自动识别（emotion-aware TTS） |
-| 🔉 **永远不会哑巴** | 主引擎挂了自动切备用，备用也挂了用免费的，保证一直有声音（MiniMax → Edge TTS 降级链） |
-| ⏸️ **说话会自然停顿** | 在逗号、句号处自然停顿，不是机器人念稿（TTS pause markers `<#0.5#>`） |
-| 📝 **桌面字幕同步** | 说话时桌面同步显示字幕，像 KTV 一样一个字一个字蹦出来（typewriter lyrics overlay） |
-| 🔇 **不会抢话** | 多条消息同时到不会叠在一起，排队一条条说（priority speech queue） |
+| 🎤 **一键声音克隆** | 上传30秒录音即可克隆声音，AI 用你自己的音色说话（MiniMax Voice Cloning API） |
+| 🎵 **8种预设音色** | 无需克隆，直接选择官方预设音色即可使用（8 preset voices） |
+| 🗣️ **14种情��语调** | 根据文本内容自动匹配情绪语气——欢快、低沉、激动等自然切换（emotion-aware TTS） |
+| 🔉 **智能降级链** | 主引擎故障自动切备用引擎，确保语音永不中断（MiniMax → Edge TTS 降级链） |
+| ⏸️ **自然停顿** | 在标点符号处自动添加语气停顿，告别机器人式朗读（TTS pause markers `<#0.5#>`） |
+| 📝 **桌面字幕同步** | 语音播报时同步显示逐字字幕，打字机效果呈现（typewriter lyrics overlay） |
+| 🔇 **消息排队播报** | 多条消息同时到达时自动排队，逐条播出不叠音（priority speech queue） |
+| 🚫 **重复消息过滤** | 相同内容自动去重，避免重复播报（whitespace-normalized dedup filter） |
 
 ### 🧠 人设 & 性格
 
 | 功能 | 说明 |
 |------|------|
-| 🎭 **5种性格随你选** | 甜妹、专业、幽默、酷帅、自定义，选一个它就变成那种说话风格（personality preset system） |
-| 📝 **自动生成人设档案** | 选好性格后一键生成 AI 的「人格档案」，不用自己写提示词（auto-generate AGENTS.md + SOUL.md + USER.md） |
-| 💬 **给宠物取名字** | 给宠物起名、设定它怎么叫你，比如"小K叫你主人"（petName + userName 配置） |
+| 🎭 **5种性格预设** | 甜妹 / 专业 / 幽默 / 酷帅 / 自定义，一键切换说话风格（personality preset system） |
+| 📝 **人设文件自动生成** | 选定性格后一键生成 AI 人格档案，无需手写提示词（auto-generate AGENTS.md + SOUL.md + USER.md） |
+| 💬 **自定义称呼** | 自定义宠物名称和对你的称呼，如「小K叫你主人」（petName + userName 配置） |
 
 ### 🛡️ Gateway 智能守护
 
 | 功能 | 说明 |
 |------|------|
-| ⚡ **挂了自动拉起来** | 检测到 Gateway 没运行会自动帮你启动，不用手动操作（Guardian auto-start，连续3次检测失败后触发） |
-| 📊 **实时健康体检** | 后台一直在监控 Gateway 状态，有问题第一时间告诉你（anomaly detection + health scoring） |
-| 🎙️ **语音播报状态** | 启动中、成功、失败都用声音告诉你，不用盯控制台（voice status announcement） |
-| 🔄 **崩了自动重启** | Gateway 崩溃后自动重启，每小时最多10次防止死循环（auto-restart with rate limiting） |
-| 🩺 **10项一键体检** | Gateway / TTS / 模型 / 端口 / 缓存 / 日志等10个维度一键诊断，告诉你怎么修（Doctor self-check） |
-| 🔧 **不会误操作** | 重启前会二次确认，避免把好的 Gateway 误杀（cross-validation with ServiceManager） |
+| ⚡ **自动拉起** | 连续3次检测 Gateway 不在线后自动启动，无需手动干预（Guardian auto-start） |
+| 📊 **实时健康监控** | 后台持续采集 Gateway 运行指标，异常时第一时间告警（anomaly detection + health scoring） |
+| 🎙️ **语音状态播报** | 启动中 / 成功 / 失败均有语音通知，不必盯控制台（voice status announcement） |
+| 🔄 **崩溃自动重启** | Gateway 异常退出后自动拉起，每小时上限10次防止死循环（auto-restart with rate limiting） |
+| 🩺 **10项一键体检** | Gateway / TTS / 模型 / 端口 / 缓存 / 日志等10维一键诊断，附修复建议（Doctor self-check） |
+| 🔧 **双重确认防误判** | 重启前与 ServiceManager 交叉校验，避免误杀健康实例（cross-validation with ServiceManager） |
+| ⏳ **启动宽限期** | 首次启动60秒内不触发重启逻辑，给 Gateway 充足启动时间（startup grace period） |
 
 ### 🧙 新手引导向导
 
 | 功能 | 说明 |
 |------|------|
-| 🎮 **游戏风格界面** | 木质边框 + 羊皮纸背景 + 龙虾向导 + 打字机对话，像在玩 RPG（RPG-style Setup Wizard） |
-| 📋 **7步搞定全部配置** | Gateway → 模型 → 消息渠道 → 语音引擎 → 播报设置 → 显示选项 → 全链路测试 |
-| ⚡ **缺什么一键装** | 检测到缺依赖，一个按钮自动安装，装的时候还能看进度条（one-click dependency install + real-time progress） |
-| 🔍 **自动检测你的环境** | 自动找 Node.js、Python、OpenClaw 等，装没装、版本多少一目了然（smart environment detection） |
-| ✅ **最后来一次全面验证** | 7项测试确保所有功能正常工作，不留隐患（end-to-end validation） |
+| 🎮 **RPG 游戏风格** | 木质边框 + 羊皮纸纹理 + 龙虾向导 NPC + 打字机对白（RPG-style Setup Wizard） |
+| 📋 **7步全流程引导** | Gateway → 模型 → 消息渠道 → 语音引擎 → 播报设置 → 显示选项 → 全链路测试 |
+| ⚡ **缺失依赖一键安装** | 检测到缺失依赖后一键安装，实时显示安装进度（one-click dependency install + real-time progress） |
+| 🔍 **智能环境检测** | 自动探测 Node.js / Python / OpenClaw 等环境状态及版本信息（smart environment detection） |
+| ✅ **全链路验证** | 7项端到端测试确保所有功能正常运行（end-to-end validation） |
+| 🐛 **错误可视化** | 向导异常时直接显示报错信息，不再白屏无提示（error visualization + crash recovery） |
 
 ### 🎨 终端 & 日志
 
 | 功能 | 说明 |
 |------|------|
-| 🌈 **彩色控制台** | 不同信息用不同颜色：模型名蓝色、URL绿色、错误红色，一眼看清（ANSI colorized logging，12+ 模块） |
-| 🔇 **日志自动去重** | 同样的消息不会重复刷屏，控制台干干净净（whitespace-normalized dedup） |
-| 📁 **日志自动整理** | 每天自动归档旧日志，超过10MB自动压缩，保留7天（log rotation + gzip archiving） |
-| 📊 **性能实时监控** | 内存、CPU、帧率随时掌握，超标了自动告警（performance monitor + 24h sample history） |
+| 🌈 **彩色终端日志** | 12+ 模块统一彩色输出——模型名青色、URL绿色、错误红色，一目了然（ANSI colorized logging） |
+| 🔇 **日志自动去重** | 空白归一化后去重，消除控制台刷屏（whitespace-normalized dedup） |
+| 📁 **日志轮转归档** | 按天归档、超10MB自动压缩、保留7天历史（log rotation + gzip archiving） |
+| 📊 **性能实时监控** | 内存 / CPU / 帧率实时采集，超阈值自动告警（performance monitor + 24h sample history） |
 
 ### 🔁 模型切换
 
 | 功能 | 说明 |
 |------|------|
-| 🔄 **一键换 AI 大脑** | Claude ↔ GPT ↔ Gemini ↔ DeepSeek，不用重启，3秒生效（hot model swap via CC-Switch） |
-| 📊 **测 AI 响应速度** | 一键测每个模型的延迟，帮你选最快的（latency benchmark） |
-| ➕ **自己加模型** | 支持15+主流 AI 服务商，也能自己填 API 地址（custom provider + preset templates） |
-| 📜 **切换历史记录** | 记录每次切了什么模型、什么时候切的，可追溯（switch history tracking） |
+| 🔄 **热切换** | Claude ↔ GPT ↔ Gemini ↔ DeepSeek 无需重启，3秒生效（hot model swap via CC-Switch） |
+| 📊 **延迟测速** | 一键对比各模型响应延迟，选择最优（latency benchmark） |
+| ➕ **自由添加模型** | 支持15+主流 AI 服务商，也可自定义 API 端点（custom provider + preset templates） |
+| 📜 **切换历史追溯** | 完整记录每次模型切换的时间与来源（switch history tracking） |
+| ↩️ **失败自动回滚** | 新模型5秒内无响应，自动回退到上一可用模型（optimistic update + 5s rollback） |
 
 ### 🔐 安全
 
 | 功能 | 说明 |
 |------|------|
-| 🔑 **密钥加密存盘** | API Key 加密后才写入硬盘，不是明文裸奔（Electron safeStorage 加密） |
-| 🛡️ **操作权限管控** | 页面不能直接调系统功能，所有操作走白名单审核（IPC whitelist sandbox） |
-| 🧹 **日志自动脱敏** | 日志里自动隐藏 API Key、Token 等敏感信息（log sanitizer） |
+| 🔑 **密钥加密存储** | API Key 经 Electron safeStorage 加密后写盘，杜绝明文泄露 |
+| 🛡️ **IPC 权限沙箱** | 渲染进程无法直接调用系统 API，所有操作经白名单校验（IPC whitelist sandbox） |
+| 🧹 **日志自动脱敏** | 日志中自动遮蔽 API Key、Token 等敏感信息（log sanitizer） |
+| 🔒 **命令注入防护** | 所有外部命令使用参数数组传递，不拼接字符串（execFile/spawn with args array） |
 
 ### 🖥️ 桌面集成
 
 | 功能 | 说明 |
 |------|------|
-| 📌 **永远置顶** | 球体和字幕永远在最上面，切窗口不会被挡住（always-on-top） |
-| 🖱️ **字幕不挡鼠标** | 歌词字幕完全穿透，不影响你点底下的东西（mouse-through transparent window） |
-| 🔗 **自动建桌面快捷方式** | 第一次打开自动在桌面创建快捷方式，下次双击就能开（auto .lnk / .app creation） |
-| 📸 **一键截图上传** | 工具栏点截图，自动截屏并上传到飞书（screenshot + Lark upload） |
-| 💬 **多平台消息同步** | Discord / Telegram / 飞书 / 企业微信的消息都能同步过来语音播报（multi-channel message sync） |
-| 🍎 **Win + Mac 都能用** | Windows 10/11 和 macOS（Intel & Apple Silicon）都支持（cross-platform Electron） |
-| 📱 **托盘菜单一站式管理** | 右键托盘图标就能切模型、看状态、开诊断、管会话（system tray context menu） |
+| 📌 **永远置顶** | 球体与字幕窗口始终位于最上层，不被其他窗口遮挡（always-on-top） |
+| 🖱️ **字幕穿透点击** | 歌词字幕窗口完全穿透鼠标事件，不影响底层操作（mouse-through transparent window） |
+| 🔗 **自动创建桌面快捷方式** | 首次启动自动生成桌面快捷方式，下次双击即用（auto .lnk / .app creation） |
+| 📸 **截图一键上传** | 工具栏一键截屏，自动上传至飞书（screenshot + Lark upload） |
+| 💬 **多平台消息同步** | Discord / Telegram / 飞书 / 企业微信消息统一同步并语音播报（multi-channel message sync） |
+| 🍎 **跨平台支持** | Windows 10/11 + macOS（Intel & Apple Silicon）双平台原生支持（cross-platform Electron） |
+| 📱 **托盘菜单** | 右键系统托盘即可切换模型、查看状态、启动诊断、管理会话（system tray context menu） |
 
 ### 🆕 v3.5.2 — Setup Wizard 修复 + 一键安装缺失依赖
 
