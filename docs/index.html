@@ -2634,13 +2634,13 @@ node kkclaw-hotswitch.js --restart</code></pre>
         // ===== KKClaw Switch Demo (完整照搬 model-settings) =====
         const KKS_PROVIDERS = [
             { name: 'Provider-A', icon: 'KK', color: '#E8613C', baseUrl: 'https://api.example.com/v1', api: 'anthropic-messages', modelCount: 22, speedTest: null, isCurrent: true,
-              quota: '无额度数据 (API Key可能无效)' },
+              series: 'D系列 · 全模型', quotaPct: 32 },
             { name: 'Provider-B', icon: 'KK', color: '#E8613C', baseUrl: 'https://api.example.com/v1', api: 'anthropic-messages', modelCount: 22, speedTest: null, isCurrent: false,
-              quota: '无额度数据 (API Key可能无效)' },
+              series: 'B系列 · Claude专用', quotaPct: 67 },
             { name: 'Provider-C 三人拼', icon: 'KK', color: '#E8613C', baseUrl: 'https://api.example.com/v1', api: 'anthropic-messages', modelCount: 22, speedTest: null, isCurrent: false,
-              quota: '无额度数据 (API Key可能无效)' },
+              series: 'C系列 · 三人拼', quotaPct: 85 },
             { name: 'Provider-D 全模型', icon: 'KK', color: '#E8613C', baseUrl: 'https://api.example.com/v1', api: 'anthropic-messages', modelCount: 22, speedTest: null, isCurrent: false,
-              quota: '无额度数据 (API Key可能无效)' },
+              series: 'D系列 · 全模型', quotaPct: 12 },
         ];
         const KKS_MODELS = {
             'Provider-A': [
@@ -2671,6 +2671,25 @@ node kkclaw-hotswitch.js --restart</code></pre>
         let kksCurrentModel = { shortName:'Claude Opus 4.6', provider:'Provider-A', modelId:'claude-opus-4-6', api:'anthropic-messages', icon:'OP', color:'#D97757' };
 
         function kksEsc(v) { return String(v??'').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+        function kksRenderQuota(p) {
+            const pct = p.quotaPct;
+            const remaining = 100 - pct;
+            const statusClass = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : 'healthy';
+            const barColor = statusClass === 'healthy' ? '#10A37F' : statusClass === 'warning' ? '#F59E0B' : '#EF4444';
+            const dotColor = barColor;
+            const tip = pct >= 95 ? '⚠ Opus 额度即将耗尽，建议切换' : pct >= 80 ? '⚠ Opus 使用率偏高，注意控制' : '当前可以放心使用 Opus';
+            const tipColor = pct >= 95 ? '#EF4444' : pct >= 80 ? '#F59E0B' : '#8E8EA0';
+            return `<div style="margin-top:6px">
+                <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#6B6B6B;margin-bottom:4px">
+                    <span style="width:6px;height:6px;border-radius:50%;display:inline-block;background:${dotColor}"></span>${kksEsc(p.series)}</div>
+                <div style="font-size:10px;color:#6B6B6B;margin-bottom:3px">Opus 本周额度 · 还剩 ${remaining}%</div>
+                <div style="height:4px;background:#ECECF1;border-radius:2px;overflow:hidden">
+                    <div style="height:100%;border-radius:2px;width:${pct}%;background:${barColor};transition:width 0.6s ease"></div>
+                </div>
+                <div style="font-size:9px;color:${tipColor};margin-top:3px">${tip}</div>
+            </div>`;
+        }
 
         function kksToast(msg) {
             const t = document.getElementById('kks-toast');
@@ -2717,7 +2736,7 @@ node kkclaw-hotswitch.js --restart</code></pre>
                     <div class="kks-provider-info">
                         <div class="kks-provider-name-row"><span class="kks-provider-name">${kksEsc(p.name)}</span>${cur?'<span class="kks-provider-badge">当前使用</span>':''}</div>
                         <div class="kks-provider-url">${kksEsc(p.baseUrl)}</div>
-                        ${p.quota?`<div class="kks-quota-info">${kksEsc(p.quota)}</div>`:''}
+                        ${p.series ? kksRenderQuota(p) : ''}
                     </div>
                     <div class="kks-provider-right">
                         ${speedHtml}
