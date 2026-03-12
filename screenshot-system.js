@@ -37,7 +37,11 @@ class ScreenshotSystem {
             try {
                 return await this.captureMacOS(filepath);
             } catch (err) {
-                console.warn('⚠️ macOS 原生截图失败，尝试 Python 方案:', err.message);
+                const msg = [
+                    `macOS 原生截图失败: ${err.message}`,
+                    '请在「系统设置 -> 隐私与安全性 -> 屏幕录制」里给当前应用授权后重试。'
+                ].join(' ');
+                throw new Error(msg);
             }
         }
 
@@ -93,7 +97,12 @@ print('SUCCESS')
      * 使用 screencapture 截图 (macOS)
      */
     async captureMacOS(filepath) {
-        await execAsync(`screencapture -x "${filepath}"`, { timeout: 10000 });
+        try {
+            await execAsync(`screencapture -x "${filepath}"`, { timeout: 10000 });
+        } catch (err) {
+            const detail = err?.stderr?.trim() || err?.message || 'unknown';
+            throw new Error(`screencapture 执行失败: ${detail}`);
+        }
         const exists = await fs.access(filepath).then(() => true).catch(() => false);
         if (exists) {
             console.log('✅ macOS截图成功:', filepath);

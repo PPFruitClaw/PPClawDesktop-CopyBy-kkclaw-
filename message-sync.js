@@ -112,7 +112,8 @@ class MessageSyncSystem extends EventEmitter {
             sender,
             content,
             channel: 'lark',
-            role
+            role,
+            sessionKey
         };
     }
 

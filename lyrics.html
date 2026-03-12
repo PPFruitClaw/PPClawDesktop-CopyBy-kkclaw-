@@ -23,18 +23,17 @@
         padding: 8px 16px;
     }
     .lyric-line {
-        color: #ffffff;
-        font-size: 13px;
-        font-weight: 600;
+        color: #ffe9b8;
+        font-size: 15px;
+        font-weight: 700;
         letter-spacing: 0.5px;
         line-height: 1.6;
         text-align: center;
-        /* 白色自发光效果 */
         text-shadow:
-            0 0 8px rgba(255,255,255,0.8),
-            0 0 16px rgba(255,255,255,0.4),
-            0 0 32px rgba(255,255,255,0.2),
-            0 1px 3px rgba(0,0,0,0.5);
+            0 1px 0 rgba(70, 46, 12, 0.9),
+            0 2px 6px rgba(24, 16, 6, 0.66),
+            0 0 16px rgba(255, 214, 139, 0.42),
+            0 0 30px rgba(255, 193, 92, 0.24);
         opacity: 0;
         transform: translateY(10px) scale(0.92);
         transition: opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94),
@@ -54,34 +53,34 @@
                     transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .lyric-sender {
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
         letter-spacing: 0.3px;
-        opacity: 0.96;
+        opacity: 0.98;
         margin-bottom: 3px;
         text-shadow:
-            0 0 10px rgba(255,255,255,0.9),
-            0 0 22px rgba(255,255,255,0.45),
-            0 1px 3px rgba(0,0,0,0.65);
+            0 1px 0 rgba(70, 46, 12, 0.9),
+            0 2px 7px rgba(24, 16, 6, 0.7),
+            0 0 14px rgba(255, 217, 146, 0.46);
     }
     .lyric-sender.user-name {
-        color: #f9f2d2;
+        color: #ffefc7;
         text-shadow:
-            0 0 10px rgba(249,242,210,0.95),
-            0 0 22px rgba(249,242,210,0.55),
-            0 1px 3px rgba(0,0,0,0.65);
+            0 1px 0 rgba(70, 46, 12, 0.9),
+            0 2px 7px rgba(24, 16, 6, 0.7),
+            0 0 14px rgba(255, 217, 146, 0.48);
     }
     .lyric-sender.agent-name {
-        color: #ffd4df;
+        color: #ffe2b1;
         text-shadow:
-            0 0 10px rgba(255,212,223,0.95),
-            0 0 24px rgba(255,212,223,0.55),
-            0 1px 3px rgba(0,0,0,0.65);
+            0 1px 0 rgba(70, 46, 12, 0.9),
+            0 2px 8px rgba(24, 16, 6, 0.72),
+            0 0 16px rgba(255, 193, 103, 0.5);
     }
     .lyric-cursor {
         display: inline-block;
         width: 2px;
-        height: 14px;
+        height: 16px;
         background: #fff;
         vertical-align: middle;
         margin-left: 2px;
@@ -95,11 +94,11 @@
 
     /* 所有消息统一白色自发光 */
     .lyric-line.agent {
-        color: #ffffff;
+        color: #ffe3ad;
     }
     .lyric-line.system {
-        color: #ffffff;
-        font-size: 11px;
+        color: #ffecbf;
+        font-size: 13px;
         opacity: 0.8;
     }
 </style>

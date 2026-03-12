@@ -2,6 +2,7 @@
 // 统一检查环境依赖是否满足运行条件，输出结构化结果
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
@@ -9,6 +10,44 @@ const pathResolver = require('./path-resolver');
 const openclawDetector = require('./openclaw-detector');
 
 class DependencyChecker {
+  _buildExecOptions(timeout = 5000) {
+    const extraPaths = [
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      path.join(os.homedir(), 'Library', 'Python', '3.14', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.13', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.12', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.11', 'bin'),
+      path.join(os.homedir(), '.local', 'bin')
+    ];
+    const mergedPath = [...extraPaths, process.env.PATH || ''].filter(Boolean).join(path.delimiter);
+    return {
+      windowsHide: true,
+      timeout,
+      env: {
+        ...process.env,
+        PATH: mergedPath
+      }
+    };
+  }
+
+  async _findPython() {
+    const candidates = [
+      'python3',
+      'python',
+      'py',
+      '/opt/homebrew/bin/python3',
+      '/usr/local/bin/python3',
+      '/usr/bin/python3'
+    ];
+    for (const cmd of candidates) {
+      try {
+        await execAsync(`${cmd} --version`, this._buildExecOptions(5000));
+        return cmd;
+      } catch (_) {}
+    }
+    return null;
+  }
   /**
    * 执行完整依赖检测
    * @returns {Promise<Object>} 每项依赖的检测结果
@@ -59,7 +98,7 @@ class DependencyChecker {
 
   async _checkNpm() {
     try {
-      const { stdout } = await execAsync('npm --version', { windowsHide: true, timeout: 5000 });
+      const { stdout } = await execAsync('npm --version', this._buildExecOptions(5000));
       return { ok: true, version: stdout.trim(), required: true };
     } catch (e) {
       return { ok: false, version: null, required: true, installHint: 'npm should come with Node.js. Reinstall Node.js if missing.' };
@@ -68,7 +107,7 @@ class DependencyChecker {
 
   async _checkGit() {
     try {
-      const { stdout } = await execAsync('git --version', { windowsHide: true, timeout: 5000 });
+      const { stdout } = await execAsync('git --version', this._buildExecOptions(5000));
       const match = stdout.match(/(\d+\.\d+[\.\d]*)/);
       return { ok: true, version: match ? match[1] : stdout.trim(), required: true };
     } catch (e) {
@@ -104,10 +143,17 @@ class DependencyChecker {
   // ─── 增强依赖（可选） ──────────────────────
 
   async _checkPython() {
-    const cmds = ['python', 'python3', 'py'];
+    const cmds = [
+      'python3',
+      'python',
+      'py',
+      '/opt/homebrew/bin/python3',
+      '/usr/local/bin/python3',
+      '/usr/bin/python3'
+    ];
     for (const cmd of cmds) {
       try {
-        const { stdout, stderr } = await execAsync(`${cmd} --version`, { windowsHide: true, timeout: 5000 });
+        const { stdout, stderr } = await execAsync(`${cmd} --version`, this._buildExecOptions(5000));
         const raw = (stdout + ' ' + stderr).trim();
         const match = raw.match(/Python (\d+)\.(\d+)/);
         if (match) {
@@ -136,7 +182,7 @@ class DependencyChecker {
     const cmds = ['pip', 'pip3'];
     for (const cmd of cmds) {
       try {
-        const { stdout } = await execAsync(`${cmd} --version`, { windowsHide: true, timeout: 5000 });
+        const { stdout } = await execAsync(`${cmd} --version`, this._buildExecOptions(5000));
         const match = stdout.match(/pip (\d+[\.\d]*)/);
         return { ok: true, version: match ? match[1] : stdout.trim(), required: false, source: cmd };
       } catch (e) { continue; }
@@ -145,14 +191,25 @@ class DependencyChecker {
   }
 
   async _checkEdgeTts() {
+    const pythonCmd = await this._findPython();
+    if (pythonCmd) {
+      try {
+        const { stdout } = await execAsync(`${pythonCmd} -m edge_tts --version`, this._buildExecOptions(5000));
+        const version = stdout.trim() || 'installed';
+        return { ok: true, version, required: false, source: `${pythonCmd} -m edge_tts` };
+      } catch (_) {
+        // fall through to pip checks
+      }
+    }
+
     try {
-      const { stdout } = await execAsync('pip show edge-tts', { windowsHide: true, timeout: 5000 });
+      const { stdout } = await execAsync('pip show edge-tts', this._buildExecOptions(5000));
       const match = stdout.match(/Version:\s*([\d.]+)/i);
       return { ok: true, version: match ? match[1] : 'installed', required: false };
     } catch (e) {
       // fallback: try pip3
       try {
-        const { stdout } = await execAsync('pip3 show edge-tts', { windowsHide: true, timeout: 5000 });
+        const { stdout } = await execAsync('pip3 show edge-tts', this._buildExecOptions(5000));
         const match = stdout.match(/Version:\s*([\d.]+)/i);
         return { ok: true, version: match ? match[1] : 'installed', required: false };
       } catch (e2) {
@@ -163,7 +220,7 @@ class DependencyChecker {
 
   async _checkSqlite3() {
     try {
-      const { stdout } = await execAsync('sqlite3 --version', { windowsHide: true, timeout: 5000 });
+      const { stdout } = await execAsync('sqlite3 --version', this._buildExecOptions(5000));
       const ver = stdout.trim().split(' ')[0];
       return { ok: true, version: ver, required: false, source: 'PATH' };
     } catch (e) {

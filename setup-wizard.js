@@ -2,6 +2,7 @@
 const { ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const fsPromises = require('fs').promises;
 const http = require('http');
 const { exec, execFile, spawn } = require('child_process');
@@ -19,6 +20,27 @@ class SetupWizard {
     this.openclawDir = path.join(this.homeDir, '.openclaw');
     this.detectedPort = 18789; // will be updated by _detectGateway
     this.registerIPC();
+  }
+
+  _buildExecOptions(timeout = 5000) {
+    const extraPaths = [
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      path.join(os.homedir(), 'Library', 'Python', '3.14', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.13', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.12', 'bin'),
+      path.join(os.homedir(), 'Library', 'Python', '3.11', 'bin'),
+      path.join(os.homedir(), '.local', 'bin')
+    ];
+    const mergedPath = [...extraPaths, process.env.PATH || ''].filter(Boolean).join(path.delimiter);
+    return {
+      timeout,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        PATH: mergedPath
+      }
+    };
   }
 
   registerIPC() {
@@ -1660,26 +1682,23 @@ ${personality}
   // ─── Python 环境检测 ──────────────────────
 
   async _checkPython() {
-    let pythonCmd = 'python';
-    let version = null;
+    const pythonCmd = await this._findPython();
+    if (!pythonCmd) {
+      return { available: false, version: null, edgeTTS: false };
+    }
 
+    let version = null;
     try {
-      const { stdout } = await execAsync('python --version', { timeout: 5000, windowsHide: true });
-      version = stdout.trim().replace('Python ', '');
+      const { stdout, stderr } = await execAsync(`${pythonCmd} --version`, this._buildExecOptions(5000));
+      version = (stdout || stderr || '').trim().replace('Python ', '');
     } catch {
-      try {
-        const { stdout } = await execAsync('python3 --version', { timeout: 5000, windowsHide: true });
-        version = stdout.trim().replace('Python ', '');
-        pythonCmd = 'python3';
-      } catch {
-        return { available: false, version: null, edgeTTS: false };
-      }
+      return { available: false, version: null, edgeTTS: false };
     }
 
     // 检测 edge-tts 包是否已安装
     let edgeTTS = false;
     try {
-      await execAsync(`${pythonCmd} -m edge_tts --help`, { timeout: 5000, windowsHide: true });
+      await execAsync(`${pythonCmd} -m edge_tts --help`, this._buildExecOptions(5000));
       edgeTTS = true;
     } catch { /* not installed */ }
 
@@ -1868,10 +1887,17 @@ ${personality}
   }
 
   async _findPython() {
-    const candidates = ['python3', 'python', 'py'];
+    const candidates = [
+      'python3',
+      'python',
+      'py',
+      '/opt/homebrew/bin/python3',
+      '/usr/local/bin/python3',
+      '/usr/bin/python3'
+    ];
     for (const cmd of candidates) {
       try {
-        await execAsync(`${cmd} --version`, { timeout: 5000, windowsHide: true });
+        await execAsync(`${cmd} --version`, this._buildExecOptions(5000));
         return cmd;
       } catch {}
     }

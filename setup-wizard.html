@@ -1498,11 +1498,8 @@ async function verifyOpenClawManualPath() {
       if (previewSource) previewSource.textContent = 'saved-manual';
       if (previewMode) previewMode.textContent = oc.installMode || 'unknown';
       if (previewCli) previewCli.textContent = oc.cliPath || '未检测到';
+      // 不重绘整个环境页，避免用户点击“验证”后回到初始状态形成循环
       await addBubble('我已经帮你验证过这个 OpenClaw 路径啦，可以识别到安装模式和主路径了~');
-      clearChat();
-      renderEnvCheck();
-      const newInput = document.getElementById('openclaw-manual-path');
-      if (newInput) newInput.value = value;
     } else {
       resultEl.style.color = '#f57f17';
       resultEl.textContent = '已记录路径，但暂时没法确认它是有效的 OpenClaw 安装';
@@ -3398,7 +3395,6 @@ init();
 </script>
 </body>
 </html>
-
 
 
 

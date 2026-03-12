@@ -4,20 +4,52 @@ const { promisify } = require('util');
 const execAsync = promisify(exec);
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 class TTSChecker {
+    static _buildExecOptions(timeout = 3000) {
+        const extraPaths = [
+            '/opt/homebrew/bin',        // macOS (Apple Silicon Homebrew)
+            '/usr/local/bin',           // macOS/Linux 常见路径
+            path.join(os.homedir(), 'Library', 'Python', '3.14', 'bin'),
+            path.join(os.homedir(), 'Library', 'Python', '3.13', 'bin'),
+            path.join(os.homedir(), 'Library', 'Python', '3.12', 'bin'),
+            path.join(os.homedir(), 'Library', 'Python', '3.11', 'bin'),
+            path.join(os.homedir(), '.local', 'bin')
+        ];
+        const mergedPath = [...extraPaths, process.env.PATH || '']
+            .filter(Boolean)
+            .join(path.delimiter);
+
+        return {
+            timeout,
+            windowsHide: true,
+            env: {
+                ...process.env,
+                PATH: mergedPath
+            }
+        };
+    }
+
     /**
      * 检测 Python 环境
      */
     static async checkPython() {
-        const pythonCmds = ['python', 'python3', 'py'];
+        const pythonCmds = [
+            'python3',
+            'python',
+            'py',
+            '/opt/homebrew/bin/python3',
+            '/usr/local/bin/python3',
+            '/usr/bin/python3'
+        ];
         
         for (const cmd of pythonCmds) {
             try {
                 const { stdout, stderr } = await execAsync(`${cmd} --version`, { 
-                    timeout: 3000, 
-                    windowsHide: true 
+                    ...this._buildExecOptions(3000)
                 });
+                const raw = (stdout + ' ' + stderr).trim();
                 const verMatch = raw.match(/Python (\d+)\.(\d+)/); const version = verMatch ? verMatch[1] + '.' + verMatch[2] : null;
                 if (version && verMatch && (parseInt(verMatch[1]) > 3 || (parseInt(verMatch[1]) === 3 && parseInt(verMatch[2]) >= 6))) {
                     return { 
@@ -44,8 +76,7 @@ class TTSChecker {
     static async checkEdgeTTS(pythonCmd = 'python') {
         try {
             await execAsync(`${pythonCmd} -m edge_tts --version`, { 
-                timeout: 3000, 
-                windowsHide: true 
+                ...this._buildExecOptions(3000)
             });
             return { available: true };
         } catch (e) {
@@ -63,8 +94,7 @@ class TTSChecker {
     static async checkDashScopePackage(pythonCmd = 'python') {
         try {
             const { stdout } = await execAsync(`${pythonCmd} -c "import dashscope; print(dashscope.__version__)"`, { 
-                timeout: 3000, 
-                windowsHide: true 
+                ...this._buildExecOptions(3000)
             });
             return { 
                 available: true,
@@ -240,8 +270,7 @@ class TTSChecker {
     static async installEdgeTTS(pythonCmd = 'python') {
         try {
             const { stdout, stderr } = await execAsync(`${pythonCmd} -m pip install edge-tts`, {
-                timeout: 60000,
-                windowsHide: true
+                ...this._buildExecOptions(60000)
             });
             
             // 验证安装
@@ -262,8 +291,7 @@ class TTSChecker {
     static async installDashScope(pythonCmd = 'python') {
         try {
             const { stdout, stderr } = await execAsync(`${pythonCmd} -m pip install dashscope`, {
-                timeout: 60000,
-                windowsHide: true
+                ...this._buildExecOptions(60000)
             });
             
             // 验证安装

@@ -594,6 +594,9 @@ async function createWindow() {
   // 监听消息同步事件
   messageSync.on('new_message', (msg) => {
     if (mainWindow) {
+      if (larkUploader && typeof larkUploader.rememberSessionTarget === 'function' && msg?.sessionKey) {
+        larkUploader.rememberSessionTarget(msg.sessionKey);
+      }
       const role = String(msg?.role || 'user').toLowerCase();
       if (role === 'assistant') {
         const displayContent = (msg.content || '').replace(/<#[\d.]+#>/g, '');
@@ -1721,8 +1724,28 @@ ipcMain.handle('take-screenshot', async (event, reason = 'manual') => {
     workLogger.log('action', `📸 开始截图: ${reason}`);
     const filepath = await screenshotSystem.captureScreen(reason);
 
+    // 若本地未记住飞书会话目标，尝试从远端会话列表恢复最近一个
+    if (larkUploader && !larkUploader.lastTarget && openclawClient?.listRemoteSessions) {
+      try {
+        const sessionsResult = await openclawClient.listRemoteSessions(120);
+        if (sessionsResult?.success && Array.isArray(sessionsResult.sessions)) {
+          const feishuSessions = sessionsResult.sessions
+            .filter(s => String(s?.key || '').includes(':feishu:'))
+            .sort((a, b) => Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0));
+          for (const s of feishuSessions) {
+            if (larkUploader.rememberSessionTarget(s.key)) break;
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+
     // 上传到飞书
-    await larkUploader.uploadToLark(filepath, `📸 ${reason}`);
+    const uploadResult = await larkUploader.uploadToLark(filepath, `📸 ${reason}`);
+    if (!uploadResult?.success) {
+      throw new Error(uploadResult?.error || '飞书上传失败');
+    }
     
     workLogger.log('success', `✅ 截图完成: ${filepath}`);
     
