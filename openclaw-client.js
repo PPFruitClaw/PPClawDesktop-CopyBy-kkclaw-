@@ -1,6 +1,8 @@
 ﻿// OpenClaw 连接模块
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const WebSocket = require('ws');
 const pathResolver = require('./utils/openclaw-path-resolver');
 const configManager = require('./utils/config-manager');
 const LogSanitizer = require('./utils/log-sanitizer');
@@ -24,14 +26,43 @@ function getOpenClawToken() {
     try {
         const configPath = pathResolver.getConfigPath();
         const token = SecureStorage.getSecureToken(configPath);
-        if (token) return token;
+        if (token) return resolveTemplateToken(token);
 
         // Fallback 到配置管理器
         const config = configManager.getConfig();
-        return config.gateway?.auth?.token || '';
+        return resolveTemplateToken(config.gateway?.auth?.token || '');
     } catch (e) {
         return '';
     }
+}
+
+function resolveTemplateToken(rawToken) {
+    const token = String(rawToken || '').trim();
+    if (!token.startsWith('${') || !token.endsWith('}')) {
+        return token;
+    }
+    const varName = token.slice(2, -1).trim();
+    if (!varName) return '';
+    if (process.env[varName]) return process.env[varName];
+
+    try {
+        const envPath = path.join(os.homedir(), '.openclaw', '.env');
+        if (!fs.existsSync(envPath)) return '';
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split(/\r?\n/)) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const idx = trimmed.indexOf('=');
+            if (idx <= 0) continue;
+            const key = trimmed.slice(0, idx).trim();
+            if (key !== varName) continue;
+            const value = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+            return value;
+        }
+    } catch (e) {
+        // ignore
+    }
+    return '';
 }
 
 class OpenClawClient {
@@ -123,59 +154,9 @@ class OpenClawClient {
         }, 30000);
 
         try {
-            const gatewayHost = this._getHost();
-            const gatewayToken = this._getToken();
-            const response = await fetch(`${gatewayHost}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${gatewayToken}`,
-                    'Content-Type': 'application/json',
-                    'x-openclaw-agent-id': 'main'
-                },
-                body: JSON.stringify({
-                    model: 'openclaw:main',
-                    messages: [
-                        { role: 'user', content: message }
-                    ],
-                    stream: false
-                })
-            });
-
+            const content = await this._sendMessageViaWebSocket(message, requestId);
             const elapsed = Date.now() - startTime;
-
-            clearTimeout(timeoutWarning); // 清除超时警告
-
-            if (!response.ok) {
-                const status = response.status;
-                const errorMsg = `请求失败 (${status})`;
-
-                // 4xx 大多是鉴权/路由/限流问题，不应直接判定 Gateway 挂掉
-                const isGatewayLikelyAlive = status >= 400 && status < 500;
-
-                if (isGatewayLikelyAlive) {
-                    console.warn(`[Req#${requestId}] ⚠️ ${errorMsg}，Gateway在线但API层异常 (耗时: ${elapsed}ms)`);
-                    this._recordError(requestId, `${errorMsg} [api-layer]`, elapsed, message);
-                    // 保持连接状态，避免误触发 guardian 重启链路
-                    this.connected = true;
-                    return errorMsg;
-                }
-
-                console.error(`[Req#${requestId}] ❌ ${errorMsg}，疑似Gateway不可用 (耗时: ${elapsed}ms)`);
-
-                // 记录错误
-                this._recordError(requestId, errorMsg, elapsed, message);
-
-                // 仅在疑似网关不可用时触发服务检测
-                if (this.onError) {
-                    this.onError(errorMsg);
-                }
-                this.connected = false;
-                return errorMsg;
-            }
-
             this.connected = true;
-            const data = await response.json();
-            const content = data.choices?.[0]?.message?.content || '无响应';
 
             // 更新 token 计数（粗略估算：中文1字≈2token，英文1词≈1.3token）
             this.sessionTokenCount += this.estimateTokens(message) + this.estimateTokens(content);
@@ -203,6 +184,349 @@ class OpenClawClient {
             }
             return `错误: ${err.message}`;
         }
+    }
+
+    async fetchChatHistory(sessionKey = 'main', limit = 50) {
+        try {
+            const payload = await this._callGatewayViaWebSocket('chat.history', { sessionKey, limit }, 15000);
+            const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+            return {
+                success: true,
+                sessionKey: payload?.sessionKey || sessionKey,
+                sessionId: payload?.sessionId || '',
+                messages
+            };
+        } catch (err) {
+            return {
+                success: false,
+                sessionKey,
+                sessionId: '',
+                messages: [],
+                error: err.message
+            };
+        }
+    }
+
+    async listRemoteSessions(limit = 120) {
+        try {
+            const payload = await this._callGatewayViaWebSocket('sessions.list', { limit }, 15000);
+            const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+            return { success: true, sessions };
+        } catch (err) {
+            return { success: false, sessions: [], error: err.message };
+        }
+    }
+
+    async _callGatewayViaWebSocket(method, params = {}, timeoutMs = 15000) {
+        const gatewayToken = this._getToken();
+        const wsUrl = this._toWsUrl(this._getHost());
+
+        return new Promise((resolve, reject) => {
+            const ws = new WebSocket(wsUrl);
+            let done = false;
+            let reqSeq = 0;
+            const pending = new Map();
+            const timers = new Set();
+
+            const finish = (err, value) => {
+                if (done) return;
+                done = true;
+
+                for (const timer of timers) clearTimeout(timer);
+                for (const [, p] of pending) p.reject(new Error('连接已关闭'));
+                pending.clear();
+
+                try {
+                    ws.removeAllListeners();
+                    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                        ws.terminate();
+                    }
+                } catch (e) { /* ignore */ }
+
+                if (err) reject(err);
+                else resolve(value);
+            };
+
+            const setTimer = (fn, ms) => {
+                const t = setTimeout(() => {
+                    timers.delete(t);
+                    fn();
+                }, ms);
+                timers.add(t);
+                return t;
+            };
+
+            const request = (rpcMethod, rpcParams, ms = 12000) => new Promise((resolveReq, rejectReq) => {
+                if (done) return rejectReq(new Error('请求已结束'));
+                if (ws.readyState !== WebSocket.OPEN) return rejectReq(new Error('WebSocket 未连接'));
+
+                const id = `rpc-${Date.now()}-${++reqSeq}`;
+                const timeout = setTimer(() => {
+                    pending.delete(id);
+                    rejectReq(new Error(`${rpcMethod} 超时`));
+                }, ms);
+
+                pending.set(id, {
+                    resolve: (payload) => {
+                        clearTimeout(timeout);
+                        timers.delete(timeout);
+                        resolveReq(payload);
+                    },
+                    reject: (err) => {
+                        clearTimeout(timeout);
+                        timers.delete(timeout);
+                        rejectReq(err);
+                    }
+                });
+
+                ws.send(JSON.stringify({
+                    type: 'req',
+                    id,
+                    method: rpcMethod,
+                    params: rpcParams
+                }));
+            });
+
+            setTimer(() => finish(new Error(`Gateway 请求超时: ${method}`)), timeoutMs);
+
+            ws.on('open', async () => {
+                try {
+                    await request('connect', {
+                        minProtocol: 3,
+                        maxProtocol: 3,
+                        client: {
+                            id: 'gateway-client',
+                            version: 'kkclaw-desktop',
+                            platform: process.platform,
+                            mode: 'cli',
+                            instanceId: `kkclaw-rpc-${Date.now()}`
+                        },
+                        role: 'operator',
+                        scopes: ['operator.admin'],
+                        caps: ['tool-events'],
+                        auth: gatewayToken ? { token: gatewayToken } : undefined
+                    });
+                    const result = await request(method, params, timeoutMs);
+                    finish(null, result);
+                } catch (err) {
+                    finish(err);
+                }
+            });
+
+            ws.on('message', (buffer) => {
+                if (done) return;
+                let msg = null;
+                try {
+                    msg = JSON.parse(String(buffer));
+                } catch (e) {
+                    return;
+                }
+
+                if (msg?.type === 'res' && msg?.id && pending.has(msg.id)) {
+                    const handler = pending.get(msg.id);
+                    pending.delete(msg.id);
+                    if (msg.ok) {
+                        handler.resolve(msg.payload);
+                    } else {
+                        const errorCode = msg.error?.code || 'REQUEST_FAILED';
+                        const errorMsg = msg.error?.message || '请求失败';
+                        handler.reject(new Error(`${errorCode} ${errorMsg}`));
+                    }
+                }
+            });
+
+            ws.on('error', (err) => finish(err));
+            ws.on('close', (code, reason) => {
+                if (!done) finish(new Error(`Gateway 连接关闭 (${code}) ${String(reason || '')}`));
+            });
+        });
+    }
+
+    _toWsUrl(host) {
+        return host.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+    }
+
+    _extractTextFromGatewayMessage(message) {
+        if (!message) return '';
+        if (typeof message === 'string') return message;
+        if (typeof message.text === 'string') return message.text;
+        if (Array.isArray(message.content)) {
+            return message.content
+                .map(part => {
+                    if (typeof part === 'string') return part;
+                    if (typeof part?.text === 'string') return part.text;
+                    return '';
+                })
+                .filter(Boolean)
+                .join('\n');
+        }
+        return '';
+    }
+
+    async _sendMessageViaWebSocket(message, requestId) {
+        const gatewayToken = this._getToken();
+        const wsUrl = this._toWsUrl(this._getHost());
+        const timeoutMs = 90000;
+
+        return new Promise((resolve, reject) => {
+            const ws = new WebSocket(wsUrl);
+            let reqSeq = 0;
+            let completed = false;
+            let runId = null;
+            let latestDelta = '';
+            const pending = new Map();
+            const timers = new Set();
+
+            const finish = (err, value) => {
+                if (completed) return;
+                completed = true;
+
+                for (const timer of timers) clearTimeout(timer);
+                for (const [, p] of pending) p.reject(new Error('连接已关闭'));
+                pending.clear();
+
+                try {
+                    ws.removeAllListeners();
+                    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                        ws.terminate();
+                    }
+                } catch (e) { /* ignore */ }
+
+                if (err) reject(err);
+                else resolve(value || '无响应');
+            };
+
+            const setTimer = (fn, ms) => {
+                const t = setTimeout(() => {
+                    timers.delete(t);
+                    fn();
+                }, ms);
+                timers.add(t);
+                return t;
+            };
+
+            const request = (method, params, ms = 12000) => new Promise((resolveReq, rejectReq) => {
+                if (completed) return rejectReq(new Error('请求已结束'));
+                if (ws.readyState !== WebSocket.OPEN) return rejectReq(new Error('WebSocket 未连接'));
+
+                const id = `req-${Date.now()}-${requestId}-${++reqSeq}`;
+                const timeout = setTimer(() => {
+                    pending.delete(id);
+                    rejectReq(new Error(`${method} 超时`));
+                }, ms);
+
+                pending.set(id, {
+                    resolve: (payload) => {
+                        clearTimeout(timeout);
+                        timers.delete(timeout);
+                        resolveReq(payload);
+                    },
+                    reject: (err) => {
+                        clearTimeout(timeout);
+                        timers.delete(timeout);
+                        rejectReq(err);
+                    }
+                });
+
+                ws.send(JSON.stringify({
+                    type: 'req',
+                    id,
+                    method,
+                    params
+                }));
+            });
+
+            setTimer(() => {
+                finish(new Error('Gateway 响应超时'));
+            }, timeoutMs);
+
+            ws.on('open', async () => {
+                try {
+                    await request('connect', {
+                        minProtocol: 3,
+                        maxProtocol: 3,
+                        client: {
+                            id: 'gateway-client',
+                            version: 'kkclaw-desktop',
+                            platform: process.platform,
+                            mode: 'cli',
+                            instanceId: `kkclaw-${Date.now()}`
+                        },
+                        role: 'operator',
+                        scopes: ['operator.admin'],
+                        caps: ['tool-events'],
+                        auth: gatewayToken ? { token: gatewayToken } : undefined
+                    });
+
+                    const sendResult = await request('chat.send', {
+                        sessionKey: 'main',
+                        idempotencyKey: `kkclaw-${Date.now()}-${requestId}`,
+                        message
+                    });
+                    runId = sendResult?.runId || null;
+                } catch (err) {
+                    finish(err);
+                }
+            });
+
+            ws.on('message', (buffer) => {
+                if (completed) return;
+                let msg = null;
+                try {
+                    msg = JSON.parse(String(buffer));
+                } catch (e) {
+                    return;
+                }
+
+                if (msg?.type === 'res' && msg?.id && pending.has(msg.id)) {
+                    const handler = pending.get(msg.id);
+                    pending.delete(msg.id);
+                    if (msg.ok) {
+                        handler.resolve(msg.payload);
+                    } else {
+                        const errorCode = msg.error?.code || 'REQUEST_FAILED';
+                        const errorMsg = msg.error?.message || '请求失败';
+                        handler.reject(new Error(`${errorCode} ${errorMsg}`));
+                    }
+                    return;
+                }
+
+                if (msg?.type !== 'event' || msg?.event !== 'chat') {
+                    return;
+                }
+
+                const payload = msg.payload || {};
+                if (runId && payload.runId && payload.runId !== runId) {
+                    return;
+                }
+
+                if (payload.state === 'delta') {
+                    const text = this._extractTextFromGatewayMessage(payload.message);
+                    if (text) latestDelta = text;
+                    return;
+                }
+
+                if (payload.state === 'error') {
+                    finish(new Error(payload.errorMessage || 'chat error'));
+                    return;
+                }
+
+                if (payload.state === 'aborted' || payload.state === 'final') {
+                    const text = this._extractTextFromGatewayMessage(payload.message) || latestDelta || '无响应';
+                    finish(null, text);
+                }
+            });
+
+            ws.on('error', (err) => {
+                finish(err);
+            });
+
+            ws.on('close', (code, reason) => {
+                if (!completed) {
+                    finish(new Error(`Gateway 连接关闭 (${code}) ${String(reason || '')}`));
+                }
+            });
+        });
     }
 
     /**

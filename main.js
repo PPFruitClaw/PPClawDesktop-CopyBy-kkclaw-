@@ -173,6 +173,22 @@ let gatewayGuardian; // 🛡️ Gateway 进程守护
 let modelSwitcher; // 🔄 模型切换器
 let setupWizard; // 🧙 首次运行向导
 let setupWizardWindow; // 🧙 向导窗口
+let hasGatewayConnectedOnce = false; // 区分首次连接与恢复连接文案
+let lastSyncAssistantSpeak = { text: '', at: 0 }; // 防止同步链路重复播报
+const AGENT_DISPLAY_NAME = '小屁'; // 桌宠对话显示名（用于歌词/历史）
+const USER_DISPLAY_NAME = '屁屁果'; // 用户显示名（本地发送与飞书同步统一）
+
+function normalizeUserSender(rawSender, channel = '') {
+  const sender = String(rawSender || '').trim();
+  const ch = String(channel || '').toLowerCase();
+  if (!sender) return USER_DISPLAY_NAME;
+  if (sender === '用户' || sender.toLowerCase() === 'user') return USER_DISPLAY_NAME;
+  if (ch === 'lark' || ch === 'feishu') return USER_DISPLAY_NAME;
+  if (sender.includes(':')) return USER_DISPLAY_NAME;
+  if (/^ou_[a-z0-9]+$/i.test(sender)) return USER_DISPLAY_NAME;
+  if (/feishu|lark/i.test(sender)) return USER_DISPLAY_NAME;
+  return sender;
+}
 
 // 🛡️ 初始化全局错误处理 (最优先)
 errorHandler = new GlobalErrorHandler({
@@ -476,9 +492,15 @@ async function createWindow() {
       if (change.service === 'gateway') {
         setTimeout(async () => {
           try {
-            await openclawClient.checkConnection();
-            colorLog('✅ Gateway 重启后已重新连接');
-            workLogger.log('success', 'Gateway 重启后已重新连接');
+            const connected = await openclawClient.checkConnection();
+            if (!connected) return;
+
+            const logText = hasGatewayConnectedOnce
+              ? '✅ Gateway 已恢复连接'
+              : '✅ Gateway 首次连接成功';
+            colorLog(logText);
+            workLogger.log('success', logText.replace('✅ ', ''));
+            hasGatewayConnectedOnce = true;
           } catch (err) {
             console.error('重连失败:', err.message);
           }
@@ -501,8 +523,9 @@ async function createWindow() {
   desktopNotifier.on('user-message', (payload) => {
     console.log('👤 用户消息:', payload);
     if (mainWindow) {
+      const senderName = normalizeUserSender(payload.sender, 'lark');
       mainWindow.webContents.send('new-message', {
-        sender: payload.sender || '用户',
+        sender: senderName,
         content: payload.content,
         channel: 'lark'
       });
@@ -510,14 +533,14 @@ async function createWindow() {
       sendLyric({
         text: payload.content,
         type: 'user',
-        sender: payload.sender || '用户'
+        sender: senderName
       });
-      workLogger.logMessage(payload.sender || '用户', payload.content);
+      workLogger.logMessage(senderName, payload.content);
       
       // 🔔 Windows 系统通知（silent: true 防止系统朗读通知内容）
       if (!mainWindow.isFocused()) {
         new Notification({
-          title: payload.sender || '用户',
+          title: senderName,
           body: payload.content.substring(0, 100),
           icon: path.join(__dirname, 'icon.png'),
           silent: true
@@ -548,7 +571,7 @@ async function createWindow() {
       sendLyric({
         text: displayContent,
         type: 'agent',
-        sender: '小K',
+        sender: AGENT_DISPLAY_NAME,
         duration: estimatedDuration
       });
       // 直接在这里触发语音,完整播放
@@ -571,12 +594,40 @@ async function createWindow() {
   // 监听消息同步事件
   messageSync.on('new_message', (msg) => {
     if (mainWindow) {
-      mainWindow.webContents.send('new-message', msg);
-      sendLyric({
-        text: msg.content, type: 'user', sender: msg.sender
-      });
-      workLogger.logMessage(msg.sender, msg.content);
-      console.log('📩 新消息:', msg.sender, '-', msg.content.substring(0, 50));
+      const role = String(msg?.role || 'user').toLowerCase();
+      if (role === 'assistant') {
+        const displayContent = (msg.content || '').replace(/<#[\d.]+#>/g, '');
+        mainWindow.webContents.send('agent-response', {
+          content: displayContent,
+          emotion: 'calm'
+        });
+        const estimatedDuration = Math.max(6000, displayContent.length * 180 + 2000);
+        sendLyric({
+          text: displayContent,
+          type: 'agent',
+          sender: AGENT_DISPLAY_NAME,
+          duration: estimatedDuration
+        });
+        // 同步到桌宠的 assistant 回复也要语音播报（飞书场景）
+        if (displayContent && voiceSystem) {
+          const now = Date.now();
+          const text = displayContent.substring(0, 800);
+          const isDuplicate = lastSyncAssistantSpeak.text === text && (now - lastSyncAssistantSpeak.at) < 3000;
+          if (!isDuplicate) {
+            voiceSystem.speak(text, { emotion: 'calm' });
+            lastSyncAssistantSpeak = { text, at: now };
+          }
+        }
+        workLogger.log('message', `同步回复: ${displayContent}`);
+        console.log('🤖 同步回复:', displayContent.substring(0, 50));
+      } else {
+        mainWindow.webContents.send('new-message', msg);
+        sendLyric({
+          text: msg.content, type: 'user', sender: msg.sender
+        });
+        workLogger.logMessage(msg.sender, msg.content);
+        console.log('📩 新消息:', msg.sender, '-', msg.content.substring(0, 50));
+      }
 
       // ⚠️ 不在这里播报语音 — desktopNotifier 的 user-message 已经负责播报了
       // 如果两边都 speak 会导致双重播报
@@ -661,7 +712,7 @@ async function createWindow() {
     setTimeout(() => {
       // 在歌词窗口显示欢迎消息
       sendLyric({
-        text: '龙虾待命 🦞',
+        text: 'PPClaw待命',
         type: 'system',
         sender: '系统'
       });
@@ -677,6 +728,22 @@ async function createWindow() {
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
+
+  // 调试日志：定位“瞬间关闭”到底是隐藏还是关闭
+  mainWindow.on('hide', () => {
+    console.log('🧭 [window] mainWindow hide');
+    // 兜底保护：若被意外隐藏，立即拉回，避免“瞬间关闭”体感
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+        console.log('🛟 [window] 检测到意外隐藏，自动恢复显示');
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }, 120);
+  });
+  mainWindow.on('show', () => console.log('🧭 [window] mainWindow show'));
+  mainWindow.on('close', () => console.log('🧭 [window] mainWindow close'));
+  mainWindow.on('closed', () => console.log('🧭 [window] mainWindow closed'));
 
   // 让窗口可以穿透点击(点击宠物除外)
   mainWindow.setIgnoreMouseEvents(false);
@@ -1011,7 +1078,13 @@ async function createWindow() {
   tray.setContextMenu(contextMenu);
   
   tray.on('click', () => {
-    mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+    // 单击托盘只做“拉起窗口”，避免误触导致瞬间隐藏
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) {
+        mainWindow.show();
+      }
+      mainWindow.focus();
+    }
   });
   
   // 模型切换后重建托盘菜单以更新显示
@@ -1516,7 +1589,7 @@ ipcMain.handle('show-history', async () => {
         setTimeout(() => {
           sendLyric({
             text: recent[i].content || recent[i].message || '',
-            type: recent[i].sender === '小K' ? 'agent' : 'user',
+            type: (recent[i].sender === AGENT_DISPLAY_NAME || recent[i].sender === '小K') ? 'agent' : 'user',
             sender: recent[i].sender || '',
             duration: 8000
           });
@@ -1533,8 +1606,22 @@ ipcMain.handle('show-history', async () => {
 let openclawSendQueue = Promise.resolve();
 ipcMain.handle('openclaw-send', async (event, message) => {
   const run = async () => {
-    workLogger.logMessage('用户', message);
+    workLogger.logMessage(USER_DISPLAY_NAME, message);
     workLogger.logTask(`处理消息: ${message}`);
+
+    // 本地发送也同步到桌宠显示链路（否则只会变表情，不会显示对话）
+    if (mainWindow) {
+      mainWindow.webContents.send('new-message', {
+        sender: USER_DISPLAY_NAME,
+        content: message,
+        channel: 'desktop'
+      });
+    }
+    sendLyric({
+      text: message,
+      type: 'user',
+      sender: USER_DISPLAY_NAME
+    });
 
     let response = await openclawClient.sendMessage(message);
 
@@ -1548,6 +1635,21 @@ ipcMain.handle('openclaw-send', async (event, message) => {
     if (response && !response.startsWith('请求失败') && !response.startsWith('连接失败') && !response.startsWith('错误')) {
       workLogger.logSuccess('消息发送成功');
       workLogger.log('message', `AI回复: ${response.substring(0, 100)}`);
+
+      if (mainWindow) {
+        mainWindow.webContents.send('agent-response', {
+          content: response,
+          emotion: 'calm'
+        });
+      }
+
+      const estimatedDuration = Math.max(6000, response.length * 180 + 2000);
+      sendLyric({
+        text: response,
+        type: 'agent',
+        sender: AGENT_DISPLAY_NAME,
+        duration: estimatedDuration
+      });
     } else {
       workLogger.logError(response || '发送失败');
     }
@@ -2500,6 +2602,7 @@ ipcMain.handle('refresh-session', async () => {
 });
 
 app.on('before-quit', () => {
+  console.log('🧭 [app] before-quit');
   // 清理歌词窗口
   if (lyricsWindow && !lyricsWindow.isDestroyed()) {
     lyricsWindow.destroy();
@@ -2531,13 +2634,23 @@ app.on('before-quit', () => {
 });
 
 app.on('window-all-closed', () => {
+  console.log('🧭 [app] window-all-closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('activate', () => {
+  console.log('🧭 [app] activate');
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+app.on('will-quit', () => {
+  console.log('🧭 [app] will-quit');
+});
+
+app.on('quit', (event, exitCode) => {
+  console.log(`🧭 [app] quit code=${exitCode}`);
 });

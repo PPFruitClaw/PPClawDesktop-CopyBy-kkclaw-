@@ -32,8 +32,27 @@ class ScreenshotSystem {
         const filename = `${timestamp}_${this.sanitizeFilename(reason)}.png`;
         const filepath = path.join(this.screenshotDir, filename);
 
+        // macOS 优先走原生命令，避免 pyautogui 依赖导致失败
+        if (process.platform === 'darwin') {
+            try {
+                return await this.captureMacOS(filepath);
+            } catch (err) {
+                console.warn('⚠️ macOS 原生截图失败，尝试 Python 方案:', err.message);
+            }
+        }
+
+        // Windows 优先走 PowerShell，避免 Python 依赖问题
+        if (process.platform === 'win32') {
+            try {
+                return await this.capturePowerShell(filepath);
+            } catch (err) {
+                console.warn('⚠️ PowerShell 截图失败，尝试 Python 方案:', err.message);
+            }
+        }
+
+        let tempPy = null;
         try {
-            // 方案1: 使用 Python desktop-control 技能
+            // 兜底方案：Python + pyautogui
             const pythonScript = `
 import sys
 import pyautogui
@@ -42,7 +61,7 @@ screenshot.save(r'${filepath.replace(/\\/g, '\\\\')}')
 print('SUCCESS')
 `;
             
-            const tempPy = path.join(__dirname, 'temp_screenshot.py');
+            tempPy = path.join(__dirname, 'temp_screenshot.py');
             await fs.writeFile(tempPy, pythonScript);
             
             const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
@@ -50,9 +69,7 @@ print('SUCCESS')
                 timeout: 10000,
                 windowsHide: true
             });
-            
-            await fs.unlink(tempPy);
-            
+
             if (stdout.includes('SUCCESS')) {
                 console.log('✅ 截图成功:', filepath);
                 return filepath;
@@ -60,13 +77,15 @@ print('SUCCESS')
                 throw new Error(stderr || '截图失败');
             }
         } catch (err) {
-            console.error('❌ Python截图失败,尝试备用方案:', err.message);
-            
-            // 方案2: 平台原生截图
-            if (process.platform === 'darwin') {
-                return await this.captureMacOS(filepath);
+            console.error('❌ Python截图失败:', err.message);
+            // 若原生方案已经失败过，最后再尝试一次平台兜底
+            if (process.platform === 'darwin') return await this.captureMacOS(filepath);
+            if (process.platform === 'win32') return await this.capturePowerShell(filepath);
+            throw err;
+        } finally {
+            if (tempPy) {
+                await fs.unlink(tempPy).catch(() => {});
             }
-            return await this.capturePowerShell(filepath);
         }
     }
 
@@ -155,6 +174,13 @@ try {
         const filename = `${timestamp}_${this.sanitizeFilename(reason)}.png`;
         const filepath = path.join(this.screenshotDir, filename);
 
+        if (process.platform === 'darwin') {
+            // -R 语法: x,y,w,h
+            await execAsync(`screencapture -x -R${x},${y},${width},${height} "${filepath}"`, { timeout: 10000 });
+            if (await this.fileExists(filepath)) return filepath;
+            throw new Error('macOS 区域截图失败');
+        }
+
         const pythonScript = `
 import pyautogui
 screenshot = pyautogui.screenshot(region=(${x}, ${y}, ${width}, ${height}))
@@ -166,7 +192,8 @@ print('SUCCESS')
         await fs.writeFile(tempPy, pythonScript);
 
         try {
-            const { stdout } = await execAsync(`python "${tempPy}"`, { timeout: 10000, windowsHide: true });
+            const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+            const { stdout } = await execAsync(`${pythonCmd} "${tempPy}"`, { timeout: 10000, windowsHide: true });
             await fs.unlink(tempPy);
 
             if (stdout.includes('SUCCESS')) {

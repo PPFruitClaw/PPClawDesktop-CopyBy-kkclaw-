@@ -54,13 +54,29 @@
                     transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .lyric-sender {
-        font-size: 10px;
-        font-weight: 400;
-        opacity: 0.6;
-        margin-bottom: 2px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        opacity: 0.96;
+        margin-bottom: 3px;
         text-shadow:
-            0 0 6px rgba(255,255,255,0.5),
-            0 1px 2px rgba(0,0,0,0.4);
+            0 0 10px rgba(255,255,255,0.9),
+            0 0 22px rgba(255,255,255,0.45),
+            0 1px 3px rgba(0,0,0,0.65);
+    }
+    .lyric-sender.user-name {
+        color: #f9f2d2;
+        text-shadow:
+            0 0 10px rgba(249,242,210,0.95),
+            0 0 22px rgba(249,242,210,0.55),
+            0 1px 3px rgba(0,0,0,0.65);
+    }
+    .lyric-sender.agent-name {
+        color: #ffd4df;
+        text-shadow:
+            0 0 10px rgba(255,212,223,0.95),
+            0 0 24px rgba(255,212,223,0.55),
+            0 1px 3px rgba(0,0,0,0.65);
     }
     .lyric-cursor {
         display: inline-block;
@@ -113,7 +129,8 @@
         // 发送者（可选）
         if (sender && type !== 'system') {
             const senderEl = document.createElement('div');
-            senderEl.className = 'lyric-sender';
+            const senderClass = type === 'agent' ? 'agent-name' : 'user-name';
+            senderEl.className = `lyric-sender ${senderClass}`;
             senderEl.textContent = sender;
             line.appendChild(senderEl);
         }
