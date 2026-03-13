@@ -22,7 +22,8 @@ class CacheManager {
       screenshots: options.screenshots || 50,      // 保留最近50张截图
       voiceFiles: options.voiceFiles || 100,       // 保留最近100个语音文件
       logDays: options.logDays || 30,              // 保留30天日志
-      cacheSize: options.cacheSize || 200 * 1024 * 1024  // 200MB应用缓存上限
+      cacheSize: options.cacheSize || 200 * 1024 * 1024, // 200MB应用缓存上限
+      inboundVoiceDays: options.inboundVoiceDays || 7    // OpenClaw inbound 语音保留天数
     };
     
     // 清理统计
@@ -79,6 +80,7 @@ class CacheManager {
     const results = {
       screenshots: await this.cleanupScreenshots(),
       voiceFiles: await this.cleanupVoiceFiles(),
+      inboundVoice: await this.cleanupInboundVoiceFiles(),
       logs: await this.cleanupLogs(),
       appCache: await this.cleanupAppCache()
     };
@@ -157,6 +159,26 @@ class CacheManager {
   }
 
   /**
+   * 清理 OpenClaw inbound 语音文件
+   * 仅删除超过保留天数的“语音扩展名 + UUID 文件名”媒体，避免误删其他附件
+   */
+  async cleanupInboundVoiceFiles() {
+    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    if (!homeDir) return { filesDeleted: 0, freedBytes: 0 };
+
+    const inboundDir = path.join(homeDir, '.openclaw', 'media', 'inbound');
+    const cutoffDate = new Date(Date.now() - this.limits.inboundVoiceDays * 24 * 60 * 60 * 1000);
+    const voiceExts = ['.ogg', '.wav', '.mp3', '.m4a', '.aac', '.opus', '.flac', '.amr', '.webm'];
+
+    return await this.cleanupDirectory(inboundDir, {
+      olderThan: cutoffDate,
+      extensions: voiceExts,
+      namePattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(ogg|wav|mp3|m4a|aac|opus|flac|amr|webm)$/i,
+      sortBy: 'mtime-asc' // 从旧到新
+    });
+  }
+
+  /**
    * 清理过期日志
    */
   async cleanupLogs() {
@@ -215,10 +237,12 @@ class CacheManager {
       for (const file of files) {
         const filePath = path.join(dirPath, file);
         try {
-          const stat = await fs.stat(filePath);
+          const stat = await fs.lstat(filePath);
           
           // 跳过目录
           if (stat.isDirectory()) continue;
+          // 跳过符号链接，避免误处理链接目标
+          if (stat.isSymbolicLink()) continue;
           
           // 检查扩展名
           if (options.extensions) {
@@ -228,6 +252,11 @@ class CacheManager {
           
           // 检查排除列表
           if (options.exclude && options.exclude.includes(file)) {
+            continue;
+          }
+
+          // 检查文件名模式
+          if (options.namePattern && !options.namePattern.test(file)) {
             continue;
           }
           
@@ -246,6 +275,8 @@ class CacheManager {
       // 排序
       if (options.sortBy === 'mtime') {
         fileStats.sort((a, b) => b.mtime - a.mtime); // 最新的在���
+      } else if (options.sortBy === 'mtime-asc') {
+        fileStats.sort((a, b) => a.mtime - b.mtime); // 最旧的在前
       } else if (options.sortBy === 'atime') {
         fileStats.sort((a, b) => b.atime - a.atime);
       }

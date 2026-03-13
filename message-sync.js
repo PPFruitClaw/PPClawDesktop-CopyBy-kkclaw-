@@ -44,10 +44,17 @@ class MessageSyncSystem extends EventEmitter {
     _sanitizeDisplayContent(content, sessionKey = '') {
         const text = String(content || '').trim();
         if (!text) return '';
-        if (!this._isFeishuSession(sessionKey)) return text;
+
+        // 统一把附件占位映射为可读文案（整句覆盖），避免路径与英文参数泄露
+        let mapped = text;
+        if (/(?:media|audio|voice)\s+attached:/i.test(mapped)) mapped = '[语音消息]';
+        else if (/(?:image|photo)\s+attached:/i.test(mapped)) mapped = '[图片消息]';
+        else if (/file\s+attached:/i.test(mapped)) mapped = '[文件消息]';
+
+        if (!this._isFeishuSession(sessionKey)) return mapped;
 
         // 去除飞书用户ID前缀: ou_xxx: 你好
-        const withoutOuPrefix = text.replace(/^ou_[a-z0-9]+:\s*/i, '');
+        const withoutOuPrefix = mapped.replace(/^ou_[a-z0-9]+:\s*/i, '');
 
         // 群聊场景下也去除明显的 ID 前缀（保留正文）
         return withoutOuPrefix.replace(/^(?:open_id|user_id|chat_id)\s*[:=]\s*[a-z0-9_-]+\s*[:：]\s*/i, '');

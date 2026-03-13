@@ -6,6 +6,7 @@
   "mood": "idle",
   "theme": "default",
   "voiceEnabled": true,
+  "cleanupInboundVoiceDays": 7,
   "ttsEngine": "minimax",
   "minimax": {
     "apiKey": "YOUR_MINIMAX_API_KEY",

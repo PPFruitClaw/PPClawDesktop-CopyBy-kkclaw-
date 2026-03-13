@@ -205,6 +205,15 @@ function normalizeUserSender(rawSender, channel = '') {
   return sender;
 }
 
+function normalizeDisplayContent(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  if (/(?:media|audio|voice)\s+attached:/i.test(raw)) return '[语音消息]';
+  if (/(?:image|photo)\s+attached:/i.test(raw)) return '[图片消息]';
+  if (/file\s+attached:/i.test(raw)) return '[文件消息]';
+  return raw;
+}
+
 function isFeishuSessionKey(sessionKey = '') {
   return /:feishu:|:lark:/i.test(String(sessionKey || ''));
 }
@@ -270,19 +279,24 @@ async function primeFeishuTarget() {
   }
 }
 
-async function convertAudioToOpus(inputPath) {
+async function convertAudioToOpus(inputPath, options = {}) {
   const src = String(inputPath || '').trim();
   if (!src || !fs.existsSync(src)) return src;
   const out = src.replace(/\.[^.]+$/i, '') + '.opus';
+  const tailPadMs = Math.max(0, Number(options.tailPadMs ?? 380));
+  const filter = `apad=pad_dur=${(tailPadMs / 1000).toFixed(3)}`;
 
   try {
     await execFileAsync('ffmpeg', [
       '-y',
       '-i', src,
+      '-af', filter,
       '-ac', '1',
-      '-ar', '16000',
+      '-ar', '48000',
       '-c:a', 'libopus',
-      '-b:a', '24k',
+      '-vbr', 'on',
+      '-application', 'voip',
+      '-b:a', '40k',
       out
     ], { timeout: 45000, windowsHide: true });
     if (fs.existsSync(out)) return out;
@@ -308,7 +322,7 @@ async function waitForVoicePipelineIdle(timeoutMs = 45000) {
   return false;
 }
 
-async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel = '', emotion = 'calm', force = false }) {
+async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel = '', emotion = 'happy', force = false }) {
   const text = String(content || '').trim();
   const inFeishu = force || isFeishuSessionKey(sessionKey) || isFeishuChannel(channel) || hasRecentFeishuContext();
   if (!text || !inFeishu) return;
@@ -335,7 +349,7 @@ async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel 
       await waitForVoicePipelineIdle(45000);
 
       // 与本地播报保持一致：复用当前语音引擎与同一套合成策略
-      const result = await voiceSystem.synthesizeToFile(text.substring(0, 800), { emotion });
+      const result = await voiceSystem.synthesizeToFile(text.substring(0, 1200), { emotion });
       const sourceAudio = result?.outputFile || '';
       if (!sourceAudio || !fs.existsSync(sourceAudio)) {
         throw new Error('语音合成未产生可用文件');
@@ -508,6 +522,7 @@ async function createWindow() {
     screenshots: 50,                // 保留50张截图
     voiceFiles: 100,                // 保留100个语音文件
     logDays: 30,                    // 保留30天日志
+    inboundVoiceDays: Number(petConfig.get('cleanupInboundVoiceDays') || 7), // inbound 语音保留天数
     onCleanup: (result) => {
       // 清理完成回调
       colorLog(`🧹 自动清理完成: ${result.freedMB}MB`);
@@ -706,6 +721,7 @@ async function createWindow() {
   desktopNotifier.on('user-message', (payload) => {
     console.log('👤 用户消息:', payload);
     if (mainWindow) {
+      const displayContent = normalizeDisplayContent(payload.content || '');
       if (payload?.sessionKey && larkUploader && typeof larkUploader.rememberSessionTarget === 'function') {
         larkUploader.rememberSessionTarget(payload.sessionKey);
       }
@@ -715,31 +731,31 @@ async function createWindow() {
       const senderName = normalizeUserSender(payload.sender, 'lark');
       mainWindow.webContents.send('new-message', {
         sender: senderName,
-        content: payload.content,
+        content: displayContent,
         channel: 'lark'
       });
       // 歌词窗口显示
       sendLyric({
-        text: payload.content,
+        text: displayContent,
         type: 'user',
         sender: senderName
       });
-      workLogger.logMessage(senderName, payload.content);
+      workLogger.logMessage(senderName, displayContent);
       
       // 🔔 Windows 系统通知（silent: true 防止系统朗读通知内容）
       if (!mainWindow.isFocused()) {
         new Notification({
           title: senderName,
-          body: payload.content.substring(0, 100),
+          body: displayContent.substring(0, 100),
           icon: path.join(__dirname, 'icon.png'),
           silent: true
         }).show();
       }
       
       // 🔊 语音播报用户消息
-      if (payload.content && voiceSystem) {
+      if (displayContent && voiceSystem) {
         const maxLength = 800; // 增加到800字,约2-3分钟
-        const voiceText = payload.content.substring(0, maxLength);
+        const voiceText = displayContent.substring(0, maxLength);
         voiceSystem.speak(voiceText);
       }
     }
@@ -768,7 +784,7 @@ async function createWindow() {
       if (payload.content && voiceSystem) {
         const maxLength = 800;
         const voiceText = payload.content.substring(0, maxLength);
-        voiceSystem.speak(voiceText, { emotion: payload.emotion || 'calm' });
+        voiceSystem.speak(voiceText, { emotion: payload.emotion || 'happy' });
       }
       // 通知链路（desktop-bridge）也要支持飞书语音回传
       if (displayContent) {
@@ -776,7 +792,7 @@ async function createWindow() {
           content: displayContent,
           sessionKey: payload?.sessionKey || '',
           channel: payload?.channel || '',
-          emotion: payload?.emotion || 'calm',
+          emotion: payload?.emotion || 'happy',
           force: true
         });
       }
@@ -804,7 +820,7 @@ async function createWindow() {
         const displayContent = (msg.content || '').replace(/<#[\d.]+#>/g, '');
         mainWindow.webContents.send('agent-response', {
           content: displayContent,
-          emotion: 'calm'
+          emotion: 'happy'
         });
         const estimatedDuration = Math.max(6000, displayContent.length * 180 + 2000);
         sendLyric({
@@ -819,7 +835,7 @@ async function createWindow() {
           const text = displayContent.substring(0, 800);
           const isDuplicate = lastSyncAssistantSpeak.text === text && (now - lastSyncAssistantSpeak.at) < 3000;
           if (!isDuplicate) {
-            voiceSystem.speak(text, { emotion: 'calm' });
+            voiceSystem.speak(text, { emotion: 'happy' });
             lastSyncAssistantSpeak = { text, at: now };
           }
         }
@@ -831,7 +847,7 @@ async function createWindow() {
             content: displayContent,
             sessionKey: msg.sessionKey,
             channel: msg.channel || 'lark',
-            emotion: 'calm',
+            emotion: 'happy',
             force: hasRecentFeishuContext()
           });
         }
@@ -1856,7 +1872,7 @@ ipcMain.handle('openclaw-send', async (event, message) => {
       if (mainWindow) {
         mainWindow.webContents.send('agent-response', {
           content: response,
-          emotion: 'calm'
+          emotion: 'happy'
         });
       }
 

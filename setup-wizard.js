@@ -1211,7 +1211,7 @@ ${voiceRules}
         'const http = require("http");',
         'const args = process.argv.slice(2);',
         'if (args.length < 2) { console.log("Usage: node desktop-bridge.js agent-response \\"text\\""); process.exit(0); }',
-        'const payload = JSON.stringify({ type: args[0], payload: { content: args.slice(1).join(" "), emotion: "calm" } });',
+        'const payload = JSON.stringify({ type: args[0], payload: { content: args.slice(1).join(" "), emotion: "happy" } });',
         'const req = http.request({ hostname: "127.0.0.1", port: 18788, path: "/notify", method: "POST",',
         '  headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }',
         '}, (res) => { console.log(res.statusCode === 200 ? "OK" : "FAIL:" + res.statusCode); });',

@@ -20,6 +20,14 @@ class PerformanceMonitor {
         this.startTime = Date.now();
         this.timer = null;
         this.isRunning = false;
+        this.memoryWarningConfig = {
+            freeMemBytes: 500 * 1024 * 1024,
+            freeMemRatio: 0.01, // 低于总内存 1%
+            consecutiveRequired: 3, // 连续 3 次采样才告警
+            cooldownMs: 10 * 60 * 1000 // 10 分钟冷却
+        };
+        this._lowMemConsecutive = 0;
+        this._lastLowMemWarnAt = 0;
         
         this.stats = {
             totalErrors: 0,
@@ -121,13 +129,27 @@ class PerformanceMonitor {
             });
         }
         
-        // 系统内存不足 (小于500MB)
-        if (sample.system.freeMem < 500 * 1024 * 1024) {
-            warnings.push({
-                type: 'system',
-                level: 'warning',
-                message: `系统内存不足: ${this.formatBytes(sample.system.freeMem)}`
-            });
+        // 系统内存不足：绝对值 + 占比 双阈值，且连续触发并冷却
+        const now = Date.now();
+        const freeMemRatio = sample.system.totalMem > 0
+            ? sample.system.freeMem / sample.system.totalMem
+            : 1;
+        const isLowMem = sample.system.freeMem < this.memoryWarningConfig.freeMemBytes &&
+            freeMemRatio < this.memoryWarningConfig.freeMemRatio;
+
+        if (isLowMem) {
+            this._lowMemConsecutive += 1;
+            const inCooldown = now - this._lastLowMemWarnAt < this.memoryWarningConfig.cooldownMs;
+            if (this._lowMemConsecutive >= this.memoryWarningConfig.consecutiveRequired && !inCooldown) {
+                warnings.push({
+                    type: 'system',
+                    level: 'warning',
+                    message: `系统内存不足: ${this.formatBytes(sample.system.freeMem)} (${(freeMemRatio * 100).toFixed(2)}%)`
+                });
+                this._lastLowMemWarnAt = now;
+            }
+        } else {
+            this._lowMemConsecutive = 0;
         }
         
         // CPU负载过高 (1分钟负载 > CPU核心数 * 2)
@@ -140,13 +162,11 @@ class PerformanceMonitor {
             });
         }
         
-        if (warnings.length > 0) {
-            this.stats.totalWarnings += warnings.length;
-            warnings.forEach(w => {
-                console.warn(`⚠️ ${w.message}`);
-                this.recordError(w.type, w.message, 'warning');
-            });
-        }
+        if (warnings.length === 0) return;
+        warnings.forEach(w => {
+            console.warn(`⚠️ ${w.message}`);
+            this.recordError(w.type, w.message, 'warning');
+        });
     }
 
     // 记录错误
@@ -233,6 +253,18 @@ class PerformanceMonitor {
     getHistoryData(minutes = 60) {
         const cutoff = Date.now() - minutes * 60 * 1000;
         const recent = this.samples.filter(s => s.timestamp > cutoff);
+        if (recent.length === 0) {
+            return {
+                samples: 0,
+                period: `${minutes}分钟`,
+                memory: {
+                    min: 0,
+                    max: 0,
+                    avg: 0
+                },
+                data: []
+            };
+        }
         
         return {
             samples: recent.length,
