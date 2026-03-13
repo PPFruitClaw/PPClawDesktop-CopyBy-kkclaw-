@@ -321,7 +321,16 @@ async function convertAudioToOpus(inputPath, options = {}) {
   if (!src || !fs.existsSync(src)) return src;
   const out = src.replace(/\.[^.]+$/i, '') + '.opus';
   const tailPadMs = Math.max(0, Number(options.tailPadMs ?? 380));
-  const filter = `apad=pad_dur=${(tailPadMs / 1000).toFixed(3)}`;
+  const enableDenoise = options.denoise !== false;
+  const filters = [];
+  if (enableDenoise) {
+    // 轻度降噪：削低频底噪 + 温和频域降噪，尽量不伤人声清晰度
+    filters.push('highpass=f=70');
+    filters.push('lowpass=f=12500');
+    filters.push('afftdn=nf=-26:nt=w');
+  }
+  filters.push(`apad=pad_dur=${(tailPadMs / 1000).toFixed(3)}`);
+  const filter = filters.join(',');
 
   try {
     await execFileAsync('ffmpeg', [
@@ -331,14 +340,39 @@ async function convertAudioToOpus(inputPath, options = {}) {
       '-ac', '1',
       '-ar', '48000',
       '-c:a', 'libopus',
+      '-compression_level', '10',
       '-vbr', 'on',
-      '-application', 'voip',
-      '-b:a', '40k',
+      '-application', 'audio',
+      '-frame_duration', '20',
+      '-b:a', '48k',
       out
     ], { timeout: 45000, windowsHide: true });
     if (fs.existsSync(out)) return out;
   } catch (err) {
     console.warn('⚠️ ffmpeg 转 opus 失败，回退原音频:', err.message);
+  }
+  return src;
+}
+
+async function normalizeAudioTempo(inputPath, tempo = 1.0) {
+  const src = String(inputPath || '').trim();
+  if (!src || !fs.existsSync(src)) return src;
+  const t = Number(tempo);
+  if (!Number.isFinite(t) || Math.abs(t - 1.0) < 0.01) return src;
+  const clamped = Math.min(2.0, Math.max(0.5, t));
+  const out = src.replace(/\.[^.]+$/i, '') + `_tempo${clamped.toFixed(2)}.wav`;
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-i', src,
+      '-af', `atempo=${clamped.toFixed(3)}`,
+      '-ar', '48000',
+      '-ac', '1',
+      out
+    ], { timeout: 60000, windowsHide: true });
+    if (fs.existsSync(out)) return out;
+  } catch (err) {
+    console.warn('⚠️ ffmpeg 语速归一失败，回退原音频:', err.message);
   }
   return src;
 }
@@ -387,10 +421,24 @@ async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel 
       await waitForVoicePipelineIdle(45000);
 
       // 与本地播报保持一致：复用当前语音引擎与同一套合成策略
-      const result = await voiceSystem.synthesizeToFile(text.substring(0, 1200), { emotion });
-      const sourceAudio = result?.outputFile || '';
+      // 仅飞书模式下发完整语音文本（不截断）；其他模式保留默认上限
+      const voiceState = getVoiceModeState();
+      const result = await voiceSystem.synthesizeToFile(text, {
+        emotion,
+        maxLength: voiceState.mode === VOICE_MODE.FEISHU_ONLY ? 0 : 800
+      });
+      let sourceAudio = result?.outputFile || '';
       if (!sourceAudio || !fs.existsSync(sourceAudio)) {
         throw new Error('语音合成未产生可用文件');
+      }
+
+      // 仅飞书模式：统一微降速，避免整段偏快
+      if (voiceState.mode === VOICE_MODE.FEISHU_ONLY) {
+        const tempoAudio = await normalizeAudioTempo(sourceAudio, 0.92);
+        if (tempoAudio && tempoAudio !== sourceAudio) {
+          try { if (fs.existsSync(sourceAudio)) fs.unlinkSync(sourceAudio); } catch {}
+          sourceAudio = tempoAudio;
+        }
       }
 
       const opusAudio = await convertAudioToOpus(sourceAudio);

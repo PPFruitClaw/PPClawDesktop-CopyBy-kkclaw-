@@ -30,6 +30,10 @@
         position: relative;
         cursor: grab;
         will-change: transform;
+        border-radius: 50%;
+        overflow: hidden; /* 强制圆形裁切，避免半透明方形底图残留 */
+        transform: translateZ(0); /* 降低透明层合成伪影 */
+        -webkit-mask-image: -webkit-radial-gradient(white, black);
     }
     .pet-wrapper:active { cursor: grabbing; }
 

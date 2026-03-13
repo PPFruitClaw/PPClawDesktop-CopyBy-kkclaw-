@@ -580,6 +580,58 @@ class SmartVoiceSystem {
         }
     }
 
+    async _concatWavFiles(files, outFile) {
+        const valid = (files || []).filter((f) => f && fsSync.existsSync(f));
+        if (valid.length === 0) {
+            throw new Error('没有可拼接的音频分段');
+        }
+        if (valid.length === 1) return valid[0];
+
+        const listFile = path.join(this.tempDir, `concat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`);
+        const lines = valid.map((f) => `file '${String(f).replace(/'/g, "'\\''")}'`).join('\n');
+        fsSync.writeFileSync(listFile, lines, 'utf8');
+        try {
+            await execFileAsync('ffmpeg', [
+                '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', listFile,
+                '-c', 'copy',
+                outFile
+            ], { timeout: 60000, windowsHide: true });
+            if (!fsSync.existsSync(outFile)) {
+                throw new Error('拼接输出文件不存在');
+            }
+            return outFile;
+        } finally {
+            try { fsSync.unlinkSync(listFile); } catch {}
+        }
+    }
+
+    async synthesizeWithQwen3ChunkedForExport(cleanText, outputFile) {
+        const cfg = this._resolveQwen3Config();
+        const chunks = this._splitTextForQwen3StreamingAdaptive(cleanText, cfg);
+        if (chunks.length <= 1) {
+            return this.synthesizeWithQwen3(cleanText, outputFile);
+        }
+
+        const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const partFiles = [];
+        try {
+            for (let i = 0; i < chunks.length; i++) {
+                const part = outputFile.replace(/\.wav$/i, `_${ts}_part${i}.wav`);
+                await this.synthesizeWithQwen3(chunks[i], part);
+                partFiles.push(part);
+            }
+            const merged = outputFile.replace(/\.wav$/i, `_${ts}_merged.wav`);
+            return await this._concatWavFiles(partFiles, merged);
+        } finally {
+            for (const f of partFiles) {
+                try { if (fsSync.existsSync(f)) fsSync.unlinkSync(f); } catch {}
+            }
+        }
+    }
+
     /**
      * 🔊 仅合成 Edge TTS 文件（不播放）
      */
@@ -780,11 +832,11 @@ print(outp)
     /**
      * ✨ 增强文本 - 让播报更自然
      */
-    enhanceText(text, analysis) {
+    enhanceText(text, analysis, options = {}) {
         let enhanced = text;
         
         // 1. 清理特殊字符
-        enhanced = this.cleanTextForSpeech(enhanced);
+        enhanced = this.cleanTextForSpeech(enhanced, { maxLength: options.maxLength });
         
         // 2. 根据情境添加语气词
         if (analysis.emotion === 'happy') {
@@ -1036,8 +1088,9 @@ print(outp)
     /**
      * 🧹 文本清理（基础版本）
      */
-    cleanTextForSpeech(text) {
+    cleanTextForSpeech(text, options = {}) {
         let cleaned = text;
+        const maxLength = Number(options.maxLength ?? 800);
         
         // Emoji 移除
         cleaned = cleaned.replace(/[\u{1F600}-\u{1F64F}]/gu, '')
@@ -1065,9 +1118,9 @@ print(outp)
         cleaned = cleaned.replace(/[【】\[\]{}「」_~#@]/g, '');
         cleaned = cleaned.replace(/TPAUSE([\d.]+)TEND/g, '<#$1#>');  // 恢复停顿标记
         
-        // 长度限制
-        if (cleaned.length > 800) {
-            cleaned = cleaned.substring(0, 800) + '，等共' + cleaned.length + '字';
+        // 长度限制（maxLength <= 0 表示不限制）
+        if (maxLength > 0 && cleaned.length > maxLength) {
+            cleaned = cleaned.substring(0, maxLength) + '，等共' + cleaned.length + '字';
         }
         
         // 空格清理
@@ -1149,8 +1202,12 @@ print(outp)
         if (options.emotion) {
             analysis.emotion = options.emotion;
         }
+        // synthesizeToFile 可单独指定 maxLength，覆盖默认 800 限制
+        if (Object.prototype.hasOwnProperty.call(options, 'maxLength')) {
+            analysis.processedText = this.enhanceText(raw, analysis, { maxLength: options.maxLength });
+        }
         const voiceConfig = this.selectVoice(analysis);
-        const cleanText = analysis.processedText || this.cleanTextForSpeech(raw);
+        const cleanText = analysis.processedText || this.cleanTextForSpeech(raw, { maxLength: options.maxLength });
         if (!cleanText.trim()) {
             throw new Error('清理后文本为空，无法合成语音');
         }
@@ -1160,7 +1217,10 @@ print(outp)
         if (this.ttsEngine === 'qwen3') {
             const wavFile = path.join(this.tempDir, `speech_export_${ts}.wav`);
             try {
-                const audioFile = await this.synthesizeWithQwen3(cleanText, wavFile);
+                const useChunkedExport = Number(options.maxLength) <= 0 && cleanText.length > 220;
+                const audioFile = useChunkedExport
+                    ? await this.synthesizeWithQwen3ChunkedForExport(cleanText, wavFile)
+                    : await this.synthesizeWithQwen3(cleanText, wavFile);
                 return { outputFile: audioFile || wavFile, engine: 'qwen3', text: cleanText };
             } catch (qwenErr) {
                 console.warn('[Voice] ⚠️ 导出语音时 Qwen3 失败，回退到 Edge:', qwenErr.message);
