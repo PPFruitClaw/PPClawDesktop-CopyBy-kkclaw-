@@ -5,6 +5,7 @@
   },
   "mood": "idle",
   "theme": "default",
+  "voiceMode": "all_on",
   "voiceEnabled": true,
   "cleanupInboundVoiceDays": 7,
   "ttsEngine": "minimax",

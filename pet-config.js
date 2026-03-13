@@ -13,6 +13,7 @@ class PetConfig {
             position: { x: null, y: null },
             mood: 'happy', // happy, thinking, busy, sleepy
             theme: 'default',
+            voiceMode: 'all_on',
             voiceEnabled: true,
             lastSeen: Date.now()
         };

@@ -8,6 +8,8 @@ const VALID_SEND_CHANNELS = [
 const VALID_INVOKE_CHANNELS = [
   'show-history',
   'set-voice-enabled',
+  'set-voice-mode',
+  'get-voice-mode',
   'model-next',
   'take-screenshot',
   'openclaw-send',

@@ -320,7 +320,12 @@ const glassShell = document.querySelector('.glass-shell');
 const inputBar = document.getElementById('inputBar');
 const inputEl = document.getElementById('input');
 const btnVoice = document.getElementById('btnVoice');
-let voiceOn = true;
+const VOICE_MODE = {
+    ALL_ON: 'all_on',
+    FEISHU_ONLY: 'feishu_only',
+    ALL_OFF: 'all_off'
+};
+let voiceMode = VOICE_MODE.ALL_ON;
 let isConnected = false;
 
 // ===== 60fps 动画 =====
@@ -1241,14 +1246,33 @@ function toggleInput() {
 }
 
 function toggleVoice() {
-    voiceOn = !voiceOn;
-    btnVoice.innerHTML = voiceOn
-        ? '<svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>'
-        : '<svg viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.35 2.18"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
-    btnVoice.classList.toggle('active', voiceOn);
-    if (electronAPI) electronAPI.invoke('set-voice-enabled', voiceOn);
+    const order = [VOICE_MODE.ALL_ON, VOICE_MODE.FEISHU_ONLY, VOICE_MODE.ALL_OFF];
+    const idx = order.indexOf(voiceMode);
+    const nextMode = order[(idx + 1) % order.length];
+    applyVoiceModeUI(nextMode);
+    if (electronAPI) electronAPI.invoke('set-voice-mode', nextMode);
     setMood('happy');
     setTimeout(() => setMood('idle'), 1500);
+}
+
+function applyVoiceModeUI(mode) {
+    voiceMode = mode;
+    if (mode === VOICE_MODE.ALL_ON) {
+        btnVoice.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+        btnVoice.classList.add('active');
+        btnVoice.title = '语音：全开（本地+飞书）';
+        return;
+    }
+    if (mode === VOICE_MODE.FEISHU_ONLY) {
+        // 麦克风+信件：仅飞书语音
+        btnVoice.innerHTML = '<svg viewBox="0 0 24 24"><path d="M7 2a2 2 0 0 1 4 0v5a2 2 0 0 1-4 0z"/><path d="M12 5v2a5 5 0 0 1-10 0V5"/><line x1="7" y1="12" x2="7" y2="15"/><line x1="4" y1="15" x2="10" y2="15"/><rect x="13" y="8" width="9" height="7" rx="1.5"/><path d="M13.5 9l4 3 4-3"/></svg>';
+        btnVoice.classList.add('active');
+        btnVoice.title = '语音：仅飞书';
+        return;
+    }
+    btnVoice.innerHTML = '<svg viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.35 2.18"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+    btnVoice.classList.remove('active');
+    btnVoice.title = '语音：全关';
 }
 
 // ===== 模型切换 (CC Switch风格) =====
@@ -1293,6 +1317,10 @@ function flashModelSwitch(color) {
 
 // 初始化时获取当前模型
 if (electronAPI) {
+    electronAPI.invoke('get-voice-mode').then((state) => {
+        applyVoiceModeUI(state?.mode || VOICE_MODE.ALL_ON);
+    }).catch(() => applyVoiceModeUI(VOICE_MODE.ALL_ON));
+
     electronAPI.invoke('model-current').then(model => {
         if (model) updateModelBadge(model);
     });

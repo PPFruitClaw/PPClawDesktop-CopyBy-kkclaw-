@@ -192,6 +192,43 @@ const LYRICS_WINDOW_WIDTH = 420;
 const LYRICS_WINDOW_HEIGHT = 160;
 const LYRICS_OFFSET_X = -110;
 const LYRICS_OFFSET_Y = -170;
+const VOICE_MODE = {
+  ALL_ON: 'all_on',
+  FEISHU_ONLY: 'feishu_only',
+  ALL_OFF: 'all_off'
+};
+let currentVoiceMode = VOICE_MODE.ALL_ON;
+
+function normalizeVoiceMode(mode, voiceEnabledFallback = true) {
+  const raw = String(mode || '').trim().toLowerCase();
+  if (raw === VOICE_MODE.ALL_ON || raw === VOICE_MODE.FEISHU_ONLY || raw === VOICE_MODE.ALL_OFF) return raw;
+  return voiceEnabledFallback === false ? VOICE_MODE.ALL_OFF : VOICE_MODE.ALL_ON;
+}
+
+function getVoiceModeState(mode = currentVoiceMode) {
+  const m = normalizeVoiceMode(mode, true);
+  return {
+    mode: m,
+    localEnabled: m === VOICE_MODE.ALL_ON,
+    feishuEnabled: m !== VOICE_MODE.ALL_OFF
+  };
+}
+
+function applyVoiceMode(mode, { persist = true } = {}) {
+  const normalized = normalizeVoiceMode(mode, petConfig?.get('voiceEnabled') !== false);
+  const state = getVoiceModeState(normalized);
+  currentVoiceMode = state.mode;
+  if (voiceSystem) {
+    voiceSystem.toggle(state.localEnabled);
+  }
+  if (persist && petConfig) {
+    petConfig.set('voiceMode', state.mode);
+    // 保持旧字段可用：只表示“本地播报是否开启”
+    petConfig.set('voiceEnabled', state.localEnabled);
+  }
+  console.log(`🎙️ 语音模式: ${state.mode} (本地:${state.localEnabled ? '开' : '关'} / 飞书:${state.feishuEnabled ? '开' : '关'})`);
+  return state;
+}
 
 function normalizeUserSender(rawSender, channel = '') {
   const sender = String(rawSender || '').trim();
@@ -326,6 +363,7 @@ async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel 
   const text = String(content || '').trim();
   const inFeishu = force || isFeishuSessionKey(sessionKey) || isFeishuChannel(channel) || hasRecentFeishuContext();
   if (!text || !inFeishu) return;
+  if (getVoiceModeState().feishuEnabled === false) return;
   if (!larkUploader || !voiceSystem) return;
   console.log(`🎵 飞书语音回传触发: channel=${channel || 'unknown'} session=${sessionKey ? 'yes' : 'no'}`);
 
@@ -466,6 +504,8 @@ async function createWindow() {
   // 初始化所有系统
   openclawClient = new OpenClawClient();
   voiceSystem = new SmartVoiceSystem(petConfig); // 🎙️ 智能语音系统
+  // 语音模式初始化（兼容旧 voiceEnabled）
+  applyVoiceMode(petConfig.get('voiceMode'), { persist: false });
   try {
     const qwen3Cfg = petConfig.get('qwen3Local') || {};
     const ttsEngine = String(petConfig.get('ttsEngine') || '').toLowerCase();
@@ -1904,10 +1944,16 @@ ipcMain.handle('openclaw-status', async () => {
 
 // 🎙️ 语音控制
 ipcMain.handle('set-voice-enabled', async (event, enabled) => {
-  voiceSystem.toggle(enabled);
-  petConfig.set('voiceEnabled', enabled);
-  console.log(`🔊 语音${enabled ? '开启' : '关闭'}`);
-  return true;
+  const mode = enabled ? VOICE_MODE.ALL_ON : VOICE_MODE.ALL_OFF;
+  return applyVoiceMode(mode, { persist: true });
+});
+
+ipcMain.handle('set-voice-mode', async (event, mode) => {
+  return applyVoiceMode(mode, { persist: true });
+});
+
+ipcMain.handle('get-voice-mode', async () => {
+  return getVoiceModeState();
 });
 
 // 🔍 TTS 依赖检测
