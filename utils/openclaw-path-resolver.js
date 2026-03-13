@@ -19,11 +19,27 @@ class OpenClawPathResolver {
         const home = process.env.HOME || process.env.USERPROFILE;
         let openclawPath = null;
 
+        // 方法0: 常见 openclaw 可执行脚本（解析 wrapper 中实际 entry.js）
+        if (!openclawPath) {
+            const localBins = [
+                path.join(home, '.local', 'bin', 'openclaw'),
+                '/usr/local/bin/openclaw',
+                '/opt/homebrew/bin/openclaw',
+            ];
+            for (const bin of localBins) {
+                const resolved = this._resolveEntryFromCliBin(bin);
+                if (resolved) {
+                    openclawPath = resolved;
+                    break;
+                }
+            }
+        }
+
         // 方法1: pnpm root -g（需要添加 PNPM_HOME 到 PATH）
         if (!openclawPath) {
             try {
                 const pnpmHome = process.env.PNPM_HOME || path.join(home, 'AppData', 'Local', 'pnpm');
-                const env = { ...process.env, PATH: `${pnpmHome};${process.env.PATH}` };
+                const env = { ...process.env, PATH: `${pnpmHome}${path.delimiter}${process.env.PATH || ''}` };
                 const pnpmRoot = execSync('pnpm root -g', { encoding: 'utf8', windowsHide: true, env }).trim();
                 const p = path.join(pnpmRoot, 'openclaw', 'dist', 'index.js');
                 if (fs.existsSync(p)) openclawPath = p;
@@ -54,9 +70,16 @@ class OpenClawPathResolver {
                 const cmd = process.platform === 'win32' ? 'where openclaw' : 'which openclaw';
                 const binPath = execSync(cmd, { encoding: 'utf8', windowsHide: true }).trim().split('\n')[0];
                 const binDir = path.dirname(binPath);
+                const fromBin = this._resolveEntryFromCliBin(binPath);
+                if (fromBin) {
+                    openclawPath = fromBin;
+                    throw new Error('__FOUND__');
+                }
                 const candidates = [
                     path.join(binDir, '..', 'node_modules', 'openclaw', 'dist', 'index.js'),
+                    path.join(binDir, '..', 'node_modules', 'openclaw', 'dist', 'entry.js'),
                     path.join(binDir, '..', 'lib', 'node_modules', 'openclaw', 'dist', 'index.js'),
+                    path.join(binDir, '..', 'lib', 'node_modules', 'openclaw', 'dist', 'entry.js'),
                 ];
                 for (const c of candidates) {
                     if (fs.existsSync(path.normalize(c))) {
@@ -75,8 +98,11 @@ class OpenClawPathResolver {
                 path.join(home, '.npm-global', 'node_modules', 'openclaw', 'dist', 'index.js'),
                 path.join(home, 'AppData', 'Roaming', 'npm', 'node_modules', 'openclaw', 'dist', 'index.js'),
                 path.join('/usr/local/lib/node_modules/openclaw/dist/index.js'),
+                path.join('/usr/local/lib/node_modules/openclaw/dist/entry.js'),
                 path.join('/usr/lib/node_modules/openclaw/dist/index.js'),
+                path.join('/usr/lib/node_modules/openclaw/dist/entry.js'),
                 path.join(home, '.nvm/versions/node', process.version, 'lib/node_modules/openclaw/dist/index.js'),
+                path.join(home, '.nvm/versions/node', process.version, 'lib/node_modules/openclaw/dist/entry.js'),
             ];
             for (const alt of altPaths) {
                 if (fs.existsSync(alt)) {
@@ -88,6 +114,21 @@ class OpenClawPathResolver {
 
         this._cachedPath = openclawPath;
         return openclawPath;
+    }
+
+    _resolveEntryFromCliBin(binPath) {
+        try {
+            if (!binPath || !fs.existsSync(binPath)) return null;
+            const content = fs.readFileSync(binPath, 'utf8');
+            // 兼容 bash wrapper: exec node "/path/to/dist/entry.js" "$@"
+            const m = content.match(/exec\s+node\s+["']([^"']+\/dist\/(?:entry|index)\.js)["']/i);
+            if (m && fs.existsSync(m[1])) {
+                return path.normalize(m[1]);
+            }
+        } catch {
+            // ignore
+        }
+        return null;
     }
 
     /**

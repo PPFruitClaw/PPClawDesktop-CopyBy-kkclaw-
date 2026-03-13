@@ -157,6 +157,10 @@ let cacheManager; // 🧹 缓存管理
 
 // 安全发送歌词到歌词窗口
 function sendLyric(data) {
+  // 系统提示不显示在歌词窗口（仅保留用户/助手对话）
+  if (data && (data.type === 'system' || String(data.sender || '').trim() === '系统')) {
+    return;
+  }
   if (lyricsWindow && !lyricsWindow.isDestroyed() && lyricsReady) {
     try {
       lyricsWindow.webContents.send('show-lyric', data);
@@ -177,6 +181,11 @@ let hasGatewayConnectedOnce = false; // 区分首次连接与恢复连接文案
 let lastSyncAssistantSpeak = { text: '', at: 0 }; // 防止同步链路重复播报
 const AGENT_DISPLAY_NAME = '小屁'; // 桌宠对话显示名（用于歌词/历史）
 const USER_DISPLAY_NAME = '屁屁果'; // 用户显示名（本地发送与飞书同步统一）
+// 歌词窗口尺寸与偏移（字体变大时避免顶部裁切）
+const LYRICS_WINDOW_WIDTH = 420;
+const LYRICS_WINDOW_HEIGHT = 160;
+const LYRICS_OFFSET_X = -110;
+const LYRICS_OFFSET_Y = -170;
 
 function normalizeUserSender(rawSender, channel = '') {
   const sender = String(rawSender || '').trim();
@@ -678,10 +687,10 @@ async function createWindow() {
   // 歌词窗口 — 桌面歌词效果
   const petPos = mainWindow.getPosition();
   lyricsWindow = new BrowserWindow({
-    width: 400,
-    height: 100,
-    x: petPos[0] - 100,
-    y: petPos[1] - 110,
+    width: LYRICS_WINDOW_WIDTH,
+    height: LYRICS_WINDOW_HEIGHT,
+    x: petPos[0] + LYRICS_OFFSET_X,
+    y: petPos[1] + LYRICS_OFFSET_Y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -1576,7 +1585,7 @@ ipcMain.on('drag-pet', (event, { x, y, offsetX, offsetY }) => {
   mainWindow.setPosition(newX, newY);
   // 歌词窗口跟随（在球体上方）
   if (lyricsWindow) {
-    lyricsWindow.setPosition(newX - 100, newY - 110);
+    lyricsWindow.setPosition(newX + LYRICS_OFFSET_X, newY + LYRICS_OFFSET_Y);
   }
   petConfig.set('position', { x: newX, y: newY });
 });
@@ -2399,17 +2408,22 @@ ipcMain.handle('diag-doctor', async () => {
     if (voiceSystem) {
       const engine = voiceSystem.ttsEngine;
       const hasMinimax = voiceSystem.minimax !== null;
+      const hasQwen3 = !!voiceSystem.qwen3?.ready;
       const stats = voiceSystem.getStats();
 
       let status = 'pass', message = '', fix = null;
-      if (engine === 'edge') {
+      if (engine === 'qwen3') {
+        status = hasQwen3 ? 'pass' : 'warn';
+        message = hasQwen3 ? '本地 Qwen3 引擎正常' : 'Qwen3 未就绪，可能已回退';
+        fix = hasQwen3 ? null : '检查 Qwen3 本地服务/模型路径配置';
+      } else if (engine === 'edge') {
         status = 'warn';
         message = '使用 Edge TTS 兜底';
         fix = '检查 MiniMax API Key 是否正确配置';
       } else {
         message = 'MiniMax 引擎正常';
       }
-      message += ` | MiniMax: ${hasMinimax ? '✓' : '✗'} | 回退: Edge TTS`;
+      message += ` | MiniMax: ${hasMinimax ? '✓' : '✗'} | Qwen3: ${hasQwen3 ? '✓' : '✗'} | 回退: Edge TTS`;
       if (!stats.enabled) { status = 'warn'; message += ' | 语音已关闭'; }
 
       checks.push({ name: '语音引擎', status, message, fix });

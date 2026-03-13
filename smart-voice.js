@@ -4,6 +4,7 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const MiniMaxTTS = require('./voice/minimax-tts');
 
 class SmartVoiceSystem {
@@ -17,11 +18,14 @@ class SmartVoiceSystem {
         this.maxQueueSize = 10;
         this.lastSpoken = '';
         this.lastSpokenTime = 0;
+        this.singleVoiceMode = true; // 固定单一音色，避免来回切换
+        this.speakSystemMessages = false; // 默认不播报系统类状态/报错
+        this.degradationNotifyEnabled = false; // 默认不发送降级消息到会话
         
         // 🎭 情境模式
         this.contextMode = 'normal';  // normal, excited, calm, urgent
         
-        // 🎙️ TTS 引擎选择: 'minimax' | 'edge'
+        // 🎙️ TTS 引擎选择: 'minimax' | 'edge' | 'qwen3'
         this.ttsEngine = 'minimax';  // 默认使用 MiniMax Speech 2.5
 
         // 🔑 MiniMax 配置
@@ -29,7 +33,14 @@ class SmartVoiceSystem {
         this.minimaxVoiceId = 'xiaotuantuan_minimax';  // 🎤 小团团克隆音色 (KK的默认)
         this.minimaxModel = 'speech-2.5-turbo-preview';
         this.minimaxEmotion = 'happy';  // 默认开心
-        this.initMiniMax();
+
+        // 🧠 本地 Qwen3-TTS 服务状态
+        this.qwen3 = {
+            process: null,
+            ready: false,
+            usingExternalServer: false
+        };
+        this._qwen3StartPromise = null;
         
         // 📊 统计数据
         this.stats = {
@@ -39,8 +50,28 @@ class SmartVoiceSystem {
             avgDuration: 0
         };
         
+        const config = this.loadConfig();
+        if (config.ttsEngine) {
+            this.ttsEngine = String(config.ttsEngine).toLowerCase();
+        }
+        this.singleVoiceMode = config.singleVoiceMode !== false;
+        this.speakSystemMessages = config.speakSystemMessages === true;
+        this.degradationNotifyEnabled = config.degradationNotifyEnabled === true;
+
+        this.initMiniMax();
         this.initTempDir();
         this._currentProcess = null; // 当前播放进程引用，用于 stop() 时杀掉
+
+        // 需要时自动启动并预热 Qwen3 本地服务
+        if (this.ttsEngine === 'qwen3' || config.qwen3Local?.enabled) {
+            this.initQwen3().catch((err) => {
+                console.error('[Voice] ⚠️ Qwen3 初始化失败:', err?.message || err);
+                if (this.ttsEngine === 'qwen3') {
+                    this.ttsEngine = 'edge';
+                    console.log('[Voice] ⚠️ 已回退到 Edge TTS');
+                }
+            });
+        }
     }
 
     async initTempDir() {
@@ -135,6 +166,7 @@ class SmartVoiceSystem {
                 minimax: this.petConfig.get('minimax') || {},
                 ttsEngine: this.petConfig.get('ttsEngine'),
                 voiceEnabled: this.petConfig.get('voiceEnabled'),
+                qwen3Local: this.petConfig.get('qwen3Local') || {},
             };
         }
         // Fallback: 直接读文件（无法解密）
@@ -151,6 +183,406 @@ class SmartVoiceSystem {
         return {};
     }
 
+    _resolveQwen3Config() {
+        const cfg = this.loadConfig().qwen3Local || {};
+        const home = process.env.HOME || '';
+        const defaultRoot = path.join(home, '.gemini', 'antigravity', 'scratch', 'VoiceClone_Qwen3-TTS', 'Qwen3-TTS');
+        const rootDir = cfg.rootDir || defaultRoot;
+        const isWin = process.platform === 'win32';
+        const defaultPython = isWin
+            ? path.join(rootDir, '.venv_qwen3', 'Scripts', 'python.exe')
+            : path.join(rootDir, '.venv_qwen3', 'bin', 'python');
+
+        return {
+            enabled: cfg.enabled !== false,
+            rootDir,
+            pythonPath: cfg.pythonPath || defaultPython,
+            modelDir: cfg.modelDir || path.join(rootDir, 'Qwen3-TTS-12Hz-1.7B-Base'),
+            refAudio: cfg.refAudio || path.join(rootDir, 'examples', 'tokenizer_demo_1.wav'),
+            refText: cfg.refText || 'This is a reference text for cloning.',
+            language: cfg.language || 'Chinese',
+            device: cfg.device || 'mps',
+            dtype: cfg.dtype || 'float32',
+            port: Number(cfg.port || 18789),
+            startupTimeoutMs: Number(cfg.startupTimeoutMs || 120000),
+            prewarmOnStart: cfg.prewarmOnStart !== false,
+            prewarmText: cfg.prewarmText || '你好，这是预热测试。',
+            streaming: cfg.streaming !== false,
+            firstChunkChars: Number(cfg.firstChunkChars || 12),
+            chunkChars: Number(cfg.chunkChars || 24),
+            minChunkChars: Number(cfg.minChunkChars || 28),
+            targetChunkChars: Number(cfg.targetChunkChars || 64),
+            maxChunkChars: Number(cfg.maxChunkChars || 128),
+            waitKChars: Number(cfg.waitKChars || 36),
+            enableCrossfade: cfg.enableCrossfade === true,
+            crossfadeMs: Number(cfg.crossfadeMs || 70),
+            maxNewTokens: Number(cfg.maxNewTokens || 768),
+            seed: Number(cfg.seed || 42),
+            xVectorOnlyMode: cfg.xVectorOnlyMode !== false,
+            serverScript: path.join(__dirname, 'voice', 'qwen3-local-server.py')
+        };
+    }
+
+    async _qwen3Health(baseUrl, timeoutMs = 1500) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+            if (!res.ok) return false;
+            const data = await res.json().catch(() => ({}));
+            return !!data?.ok;
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async initQwen3() {
+        if (this.qwen3.ready) return true;
+        if (this._qwen3StartPromise) return this._qwen3StartPromise;
+
+        this._qwen3StartPromise = this._startQwen3Server().finally(() => {
+            this._qwen3StartPromise = null;
+        });
+        return this._qwen3StartPromise;
+    }
+
+    async _startQwen3Server() {
+        const cfg = this._resolveQwen3Config();
+        const baseUrl = `http://127.0.0.1:${cfg.port}`;
+
+        if (await this._qwen3Health(baseUrl)) {
+            this.qwen3.ready = true;
+            this.qwen3.usingExternalServer = true;
+            console.log(`[Voice] 🎙️ 检测到外部 Qwen3 服务: ${baseUrl}`);
+            return true;
+        }
+
+        if (!cfg.enabled) throw new Error('qwen3Local.enabled=false');
+        if (!fsSync.existsSync(cfg.serverScript)) throw new Error(`服务脚本不存在: ${cfg.serverScript}`);
+        if (!fsSync.existsSync(cfg.pythonPath)) throw new Error(`Python 不存在: ${cfg.pythonPath}`);
+        if (!fsSync.existsSync(cfg.modelDir)) throw new Error(`模型目录不存在: ${cfg.modelDir}`);
+        if (!fsSync.existsSync(cfg.refAudio)) throw new Error(`参考音频不存在: ${cfg.refAudio}`);
+
+        const args = [
+            cfg.serverScript,
+            '--model-dir', cfg.modelDir,
+            '--ref-audio', cfg.refAudio,
+            '--ref-text', cfg.refText,
+            '--device', cfg.device,
+            '--dtype', cfg.dtype,
+            '--port', String(cfg.port),
+            '--max-new-tokens', String(cfg.maxNewTokens),
+            '--seed', String(cfg.seed),
+            '--output-dir', this.tempDir
+        ];
+        if (cfg.xVectorOnlyMode) {
+            args.push('--x-vector-only-mode');
+        }
+        const child = spawn(cfg.pythonPath, args, {
+            cwd: path.dirname(cfg.serverScript),
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        this.qwen3.process = child;
+        this.qwen3.usingExternalServer = false;
+
+        child.stdout.on('data', (buf) => {
+            const line = String(buf).trim();
+            if (line) console.log(`[Qwen3Local] ${line}`);
+        });
+        child.stderr.on('data', (buf) => {
+            const line = String(buf).trim();
+            if (line) console.warn(`[Qwen3Local][stderr] ${line}`);
+        });
+        child.on('exit', (code, signal) => {
+            this.qwen3.ready = false;
+            this.qwen3.process = null;
+            console.warn(`[Voice] ⚠️ Qwen3 服务退出 code=${code} signal=${signal}`);
+        });
+
+        const startTs = Date.now();
+        let ready = false;
+        while (Date.now() - startTs < cfg.startupTimeoutMs) {
+            if (await this._qwen3Health(baseUrl, 1000)) {
+                ready = true;
+                break;
+            }
+            await new Promise((r) => setTimeout(r, 700));
+        }
+        if (!ready) {
+            if (this.qwen3.process && !this.qwen3.process.killed) this.qwen3.process.kill('SIGTERM');
+            throw new Error('Qwen3 服务启动超时');
+        }
+        this.qwen3.ready = true;
+        console.log(`[Voice] ✅ Qwen3 服务就绪: ${baseUrl}`);
+
+        if (cfg.prewarmOnStart) {
+            await this._qwen3Prewarm(baseUrl, cfg.prewarmText).catch((err) => {
+                console.warn('[Voice] ⚠️ Qwen3 预热失败:', err?.message || err);
+            });
+        }
+        return true;
+    }
+
+    async _qwen3Prewarm(baseUrl, text) {
+        const res = await fetch(`${baseUrl}/prewarm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        if (!res.ok) throw new Error(`prewarm http ${res.status}`);
+        const data = await res.json();
+        if (!data?.ok) throw new Error(data?.error || 'prewarm failed');
+        console.log(`[Voice] 🔥 Qwen3 预热完成: ${data.elapsedSec || '?'}s`);
+    }
+
+    _splitTextForQwen3Streaming(text, firstChunkChars, chunkChars) {
+        const src = String(text || '').trim();
+        if (!src) return [];
+        const baseParts = src
+            .split(/(?<=[。！？!?；;，,、])/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        if (baseParts.length === 0) return [];
+
+        const merged = [];
+        let buf = '';
+        for (const p of baseParts) {
+            if ((buf + p).length <= chunkChars) {
+                buf += p;
+                continue;
+            }
+            if (buf) merged.push(buf);
+            if (p.length <= chunkChars) {
+                buf = p;
+            } else {
+                const chunks = p.match(new RegExp(`.{1,${chunkChars}}`, 'g')) || [p];
+                merged.push(...chunks.slice(0, -1));
+                buf = chunks[chunks.length - 1];
+            }
+        }
+        if (buf) merged.push(buf);
+
+        if (merged[0] && merged[0].length > firstChunkChars) {
+            const head = merged[0].slice(0, firstChunkChars);
+            const tail = merged[0].slice(firstChunkChars);
+            merged[0] = head;
+            if (tail) merged.splice(1, 0, tail);
+        }
+        return merged;
+    }
+
+    _splitTextForQwen3StreamingAdaptive(text, cfg) {
+        const src = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!src) return [];
+
+        const minLen = Math.max(8, Number(cfg.minChunkChars || 24));
+        const targetLen = Math.max(minLen, Number(cfg.targetChunkChars || 48));
+        const maxLen = Math.max(targetLen, Number(cfg.maxChunkChars || 96));
+        const waitK = Math.max(minLen, Number(cfg.waitKChars || 28));
+
+        // 先按标点切分，尽量保证韵律边界
+        const parts = src
+            .split(/(?<=[。！？!?；;，,、])/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+        const chunks = [];
+        let buf = '';
+        const flush = () => {
+            if (!buf) return;
+            chunks.push(buf.trim());
+            buf = '';
+        };
+
+        const hardSplit = (str) => {
+            let remain = str;
+            while (remain.length > maxLen) {
+                // 在 target 附近找最近的标点，找不到再硬切
+                const center = Math.min(targetLen, remain.length - 1);
+                const left = Math.max(0, center - 12);
+                const right = Math.min(remain.length - 1, center + 12);
+                let cut = -1;
+                for (let i = right; i >= left; i--) {
+                    if (/[,，。！？!?；;、]/.test(remain[i])) {
+                        cut = i + 1;
+                        break;
+                    }
+                }
+                if (cut <= 0) cut = targetLen;
+                chunks.push(remain.slice(0, cut).trim());
+                remain = remain.slice(cut).trim();
+            }
+            if (remain) chunks.push(remain);
+        };
+
+        for (const p of parts) {
+            if (!buf) {
+                buf = p;
+                continue;
+            }
+            const combined = `${buf}${p}`;
+            if (combined.length <= targetLen) {
+                buf = combined;
+                continue;
+            }
+            if (buf.length < minLen && combined.length <= maxLen) {
+                buf = combined;
+                continue;
+            }
+            flush();
+            if (p.length > maxLen) hardSplit(p);
+            else buf = p;
+        }
+        flush();
+
+        // 合并过短尾块
+        for (let i = 0; i < chunks.length - 1; i++) {
+            if (chunks[i].length < minLen) {
+                chunks[i + 1] = `${chunks[i]}${chunks[i + 1]}`;
+                chunks[i] = '';
+            }
+        }
+        const merged = chunks.filter(Boolean);
+
+        // wait-k：首包至少达到阈值，减少“太早开口导致断裂感”
+        while (merged.length > 1 && merged[0].length < waitK) {
+            merged[1] = `${merged[0]}${merged[1]}`;
+            merged.shift();
+        }
+
+        // 尾包过短时并回前一段，减少“结尾突然快读”
+        if (merged.length > 1) {
+            const tail = merged[merged.length - 1];
+            if (tail.length < Math.max(12, Math.floor(minLen * 0.6))) {
+                merged[merged.length - 2] = `${merged[merged.length - 2]}${tail}`;
+                merged.pop();
+            }
+        }
+
+        // 末段缺少句末停顿时补全标点，帮助收尾节奏稳定
+        if (merged.length > 0 && !/[。！？!?；;]$/.test(merged[merged.length - 1])) {
+            merged[merged.length - 1] = `${merged[merged.length - 1]}。`;
+        }
+
+        return merged;
+    }
+
+    async synthesizeWithQwen3(text, outputFile) {
+        const cfg = this._resolveQwen3Config();
+        const baseUrl = `http://127.0.0.1:${cfg.port}`;
+        const ready = this.qwen3.ready || await this.initQwen3();
+        if (!ready) throw new Error('Qwen3 服务不可用');
+
+        const res = await fetch(`${baseUrl}/synthesize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                outputFile,
+                language: cfg.language
+            })
+        });
+        if (!res.ok) throw new Error(`Qwen3 HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data?.ok) throw new Error(data?.error || 'synthesize failed');
+        return data.outputFile || outputFile;
+    }
+
+    async speakWithQwen3(cleanText, outputFile) {
+        const cfg = this._resolveQwen3Config();
+        if (!cfg.streaming) {
+            const audio = await this.synthesizeWithQwen3(cleanText, outputFile.replace(/\.mp3$/i, '.wav'));
+            await this._playAudioFile(audio);
+            return;
+        }
+
+        const chunks = this._splitTextForQwen3StreamingAdaptive(cleanText, cfg);
+        if (chunks.length === 0) return;
+
+        const synthAt = (index) => {
+            const chunkOut = outputFile.replace(/\.mp3$/i, `_${index}.wav`);
+            return this.synthesizeWithQwen3(chunks[index], chunkOut);
+        };
+
+        // 流水线：默认单段顺播；开启 crossfade 时按两段配对平滑播放
+        let i = 0;
+        let currentPromise = synthAt(0);
+        while (i < chunks.length) {
+            let audio = await currentPromise;
+
+            if (cfg.enableCrossfade && i + 1 < chunks.length) {
+                const nextAudio = await synthAt(i + 1);
+                const mergedOut = outputFile.replace(/\.mp3$/i, `_${i}_cf.wav`);
+                audio = await this._crossfadePairWav(audio, nextAudio, mergedOut, cfg.crossfadeMs, cfg.pythonPath);
+                i += 2;
+            } else {
+                i += 1;
+            }
+
+            if (i < chunks.length) {
+                currentPromise = synthAt(i);
+            }
+            await this._playAudioFile(audio);
+        }
+    }
+
+    async _crossfadePairWav(firstFile, secondFile, outFile, fadeMs = 90, pythonPath = null) {
+        const py = pythonPath || (process.platform === 'win32' ? 'python' : 'python3');
+        const fade = Math.max(0, Number(fadeMs || 0));
+        if (fade <= 0) return firstFile;
+
+        const code = `
+import sys
+import numpy as np
+import soundfile as sf
+
+f1, f2, outp, fade_ms = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+x1, sr1 = sf.read(f1)
+x2, sr2 = sf.read(f2)
+if sr1 != sr2:
+    raise RuntimeError(f"sample rate mismatch: {sr1} vs {sr2}")
+if x1.ndim > 1:
+    x1 = x1.mean(axis=1)
+if x2.ndim > 1:
+    x2 = x2.mean(axis=1)
+fade_n = int(sr1 * max(0.0, fade_ms) / 1000.0)
+fade_n = min(fade_n, len(x1), len(x2))
+if fade_n <= 0:
+    y = np.concatenate([x1, x2], axis=0)
+else:
+    head = x1[:-fade_n]
+    tail1 = x1[-fade_n:]
+    head2 = x2[:fade_n]
+    tail2 = x2[fade_n:]
+    # 先做相邻片段 RMS 对齐，减少“音量突然跳变”
+    eps = 1e-8
+    rms1 = float(np.sqrt(np.mean(np.square(tail1))) + eps)
+    rms2 = float(np.sqrt(np.mean(np.square(head2))) + eps)
+    gain = np.clip(rms1 / rms2, 0.7, 1.4)
+    x2 = x2 * gain
+    head2 = x2[:fade_n]
+    tail2 = x2[fade_n:]
+    w = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+    mid = tail1 * (1.0 - w) + head2 * w
+    y = np.concatenate([head, mid, tail2], axis=0)
+sf.write(outp, y, sr1)
+print(outp)
+`;
+
+        try {
+            await execFileAsync(py, ['-c', code, firstFile, secondFile, outFile, String(fade)], {
+                timeout: 45000,
+                windowsHide: true
+            });
+            return outFile;
+        } catch (err) {
+            console.warn('[Voice] ⚠️ Crossfade 失败，回退直接播放:', err?.message || err);
+            return firstFile;
+        }
+    }
+
     /**
      * 🎯 智能播报入口
      * @param {string} text - 要播报的文本
@@ -159,6 +591,12 @@ class SmartVoiceSystem {
     async speak(text, options = {}) {
         if (!this.enabled) {
             console.log('🔇 语音已关闭');
+            return;
+        }
+
+        if (!this.speakSystemMessages && (options.system === true || this.isSystemMessage(text))) {
+            this.stats.totalSkipped++;
+            console.log(`⏭️ 跳过系统播报: ${String(text).substring(0, 60)}`);
             return;
         }
 
@@ -259,6 +697,15 @@ class SmartVoiceSystem {
     }
 
     /**
+     * 系统状态类消息默认不播报，避免“报错内容被念出来”
+     */
+    isSystemMessage(text) {
+        const s = String(text || '').trim();
+        if (!s) return true;
+        return /Gateway|OpenClaw|服务|断开|断连|连接已恢复|重启|启动失败|配置错误|health|健康|缓存|清理|检测到|警告|告警|异常|降级|评分|会话已清理|快捷方式已创建/i.test(s);
+    }
+
+    /**
      * ✨ 增强文本 - 让播报更自然
      */
     enhanceText(text, analysis) {
@@ -355,6 +802,14 @@ class SmartVoiceSystem {
      * 🎭 根据内容选择语音
      */
     selectVoice(analysis) {
+        if (this.singleVoiceMode) {
+            return {
+                voice: 'zh-CN-XiaoxiaoNeural',
+                rate: '+0%',
+                pitch: '+0Hz'
+            };
+        }
+
         let config = {
             voice: this.voice,
             rate: '+0%',    // 语速
@@ -437,7 +892,17 @@ class SmartVoiceSystem {
             console.log(`${categoryIcon} 播报: ${cleanText.substring(0, 40)}${cleanText.length > 40 ? '...' : ''}`);
             
             // 🎙️ 根据引擎选择 TTS 方式
-            if (this.ttsEngine === 'minimax' && this.minimax) {
+            if (this.ttsEngine === 'qwen3') {
+                try {
+                    await this.speakWithQwen3(cleanText, outputFile);
+                } catch (qwenErr) {
+                    console.error('[Voice] ❌ Qwen3 失败，回退到 Edge TTS:', qwenErr.message);
+                    if (this.degradationNotifyEnabled) {
+                        this.notifyDegradation('qwen3', 'edge', qwenErr.message);
+                    }
+                    await this.speakWithEdgeTTS(cleanText, voiceConfig, outputFile);
+                }
+            } else if (this.ttsEngine === 'minimax' && this.minimax) {
                 // MiniMax Speech 2.5 (带情感控制)
                 try {
                     // 优先用 analysis 传入的 emotion，否则自动检测
@@ -456,7 +921,9 @@ class SmartVoiceSystem {
                 } catch (minimaxErr) {
                     console.error('[Voice] ❌ MiniMax 失败，回退到 Edge TTS:', minimaxErr.message);
                     // 🚨 发送降级通知
-                    this.notifyDegradation('minimax', 'edge', minimaxErr.message);
+                    if (this.degradationNotifyEnabled) {
+                        this.notifyDegradation('minimax', 'edge', minimaxErr.message);
+                    }
                     // 直接回退到 Edge TTS
                     await this.speakWithEdgeTTS(cleanText, voiceConfig, outputFile);
                 }
@@ -577,6 +1044,16 @@ class SmartVoiceSystem {
             this._currentProcess.kill();
             this._currentProcess = null;
         }
+        this.stopQwen3Server();
+    }
+
+    stopQwen3Server() {
+        if (this.qwen3.usingExternalServer) return;
+        if (this.qwen3.process && !this.qwen3.process.killed) {
+            this.qwen3.process.kill('SIGTERM');
+        }
+        this.qwen3.process = null;
+        this.qwen3.ready = false;
     }
 
     /**
@@ -611,13 +1088,18 @@ class SmartVoiceSystem {
      * 🎙️ 切换 TTS 引擎
      */
     setEngine(engine) {
-        if (!['minimax', 'edge'].includes(engine)) {
-            console.log(`[Voice] ⚠️ 不支持的引擎: ${engine}，可选: minimax, edge`);
+        if (!['minimax', 'edge', 'qwen3'].includes(engine)) {
+            console.log(`[Voice] ⚠️ 不支持的引擎: ${engine}，可选: minimax, edge, qwen3`);
             return false;
         }
         if (engine === 'minimax' && !this.minimax) {
             console.log('[Voice] ⚠️ MiniMax 未初始化，无法切换');
             return false;
+        }
+        if (engine === 'qwen3') {
+            this.initQwen3().catch((err) => {
+                console.warn('[Voice] ⚠️ Qwen3 初始化失败:', err?.message || err);
+            });
         }
         this.ttsEngine = engine;
         console.log(`[Voice] 🎙️ TTS 引擎切换为: ${engine}`);
