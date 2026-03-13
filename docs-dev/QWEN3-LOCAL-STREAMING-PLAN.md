@@ -34,7 +34,7 @@
   "ttsEngine": "qwen3",
   "qwen3Local": {
     "enabled": true,
-    "rootDir": "/Users/ppg/.gemini/antigravity/scratch/VoiceClone_Qwen3-TTS/Qwen3-TTS",
+    "rootDir": "<your-workspace>/VoiceClone_Qwen3-TTS/Qwen3-TTS",
     "pythonPath": "<rootDir>/.venv_qwen3/bin/python",
     "modelDir": "<rootDir>/Qwen3-TTS-12Hz-1.7B-Base",
     "refAudio": "<rootDir>/examples/tokenizer_demo_1.wav",
