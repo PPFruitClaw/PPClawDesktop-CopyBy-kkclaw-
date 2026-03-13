@@ -23,7 +23,8 @@ if (process.env.ELECTRON_RUN_AS_NODE === '1') {
 const { app, BrowserWindow, ipcMain, screen, Menu, Tray, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { promisify } = require('util');
 const OpenClawClient = require('./openclaw-client');
 const SmartVoiceSystem = require('./smart-voice'); // 🎙️ 智能语音系统
 const MessageSyncSystem = require('./message-sync');
@@ -46,6 +47,7 @@ const SecureStorage = require('./utils/secure-storage'); // 🔒 安全存储
 const pathResolver = require('./utils/openclaw-path-resolver'); // 🔧 路径解析
 const SessionLockManager = require('./utils/session-lock-manager');
 const { printHero, printReady } = require('./startup-banner'); // 🦞 启动动画
+const execFileAsync = promisify(execFile);
 
 // Windows透明窗口修复 — 禁用硬件加速彻底解决浅色背景矩形框
 // macOS 上禁用硬件加速反而会破坏透明度，仅在 Windows 上启用
@@ -179,6 +181,10 @@ let setupWizard; // 🧙 首次运行向导
 let setupWizardWindow; // 🧙 向导窗口
 let hasGatewayConnectedOnce = false; // 区分首次连接与恢复连接文案
 let lastSyncAssistantSpeak = { text: '', at: 0 }; // 防止同步链路重复播报
+let lastFeishuVoiceReply = { sessionKey: '', text: '', at: 0 }; // 防止飞书语音回传重复发送
+let lastFeishuContext = { at: 0, sessionKey: '' }; // 最近一次飞书上下文
+let feishuTargetRefreshTimer = null; // 飞书目标定时刷新
+let feishuVoiceSerial = Promise.resolve(); // 飞书语音回传串行队列，避免并发抢资源
 const AGENT_DISPLAY_NAME = '小屁'; // 桌宠对话显示名（用于歌词/历史）
 const USER_DISPLAY_NAME = '屁屁果'; // 用户显示名（本地发送与飞书同步统一）
 // 歌词窗口尺寸与偏移（字体变大时避免顶部裁切）
@@ -197,6 +203,160 @@ function normalizeUserSender(rawSender, channel = '') {
   if (/^ou_[a-z0-9]+$/i.test(sender)) return USER_DISPLAY_NAME;
   if (/feishu|lark/i.test(sender)) return USER_DISPLAY_NAME;
   return sender;
+}
+
+function isFeishuSessionKey(sessionKey = '') {
+  return /:feishu:|:lark:/i.test(String(sessionKey || ''));
+}
+
+function isFeishuChannel(channel = '') {
+  return /^(feishu|lark)$/i.test(String(channel || '').trim());
+}
+
+function looksLikeFeishuSender(sender = '') {
+  const s = String(sender || '').trim();
+  return /^ou_[a-z0-9_-]+$/i.test(s) || /feishu|lark/i.test(s);
+}
+
+function touchFeishuContext(sessionKey = '') {
+  lastFeishuContext = { at: Date.now(), sessionKey: String(sessionKey || '') };
+}
+
+function hasRecentFeishuContext(windowMs = 120000) {
+  return (Date.now() - Number(lastFeishuContext.at || 0)) <= windowMs;
+}
+
+async function ensureLarkTargetReady(preferredSessionKey = '') {
+  if (!larkUploader || typeof larkUploader.rememberSessionTarget !== 'function') return false;
+
+  if (preferredSessionKey) {
+    const ok = larkUploader.rememberSessionTarget(preferredSessionKey);
+    if (ok && larkUploader.lastTarget?.receiveId) return true;
+  }
+  if (larkUploader.lastTarget?.receiveId) return true;
+
+  if (openclawClient?.listRemoteSessions) {
+    try {
+      const sessionsResult = await openclawClient.listRemoteSessions(120);
+      if (sessionsResult?.success && Array.isArray(sessionsResult.sessions)) {
+        const feishuSessions = sessionsResult.sessions
+          .filter(s => /:(feishu|lark):/i.test(String(s?.key || '')))
+          .sort((a, b) => (b?.lastActivity || 0) - (a?.lastActivity || 0));
+        console.log(`🎯 自动发现飞书/飞书国际会话: ${feishuSessions.length} 个`);
+        for (const s of feishuSessions) {
+          if (larkUploader.rememberSessionTarget(s.key)) {
+            console.log(`✅ 已锁定会话目标: ${s.key}`);
+            return true;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ 自动发现飞书会话失败:', err.message);
+    }
+  }
+  return !!larkUploader.lastTarget?.receiveId;
+}
+
+async function primeFeishuTarget() {
+  try {
+    const ok = await ensureLarkTargetReady(lastFeishuContext.sessionKey || '');
+    if (ok) {
+      console.log(`🎯 飞书目标已就绪: ${JSON.stringify(larkUploader?.lastTarget || {})}`);
+    }
+    return ok;
+  } catch (err) {
+    console.warn('⚠️ 预热飞书目标失败:', err.message);
+    return false;
+  }
+}
+
+async function convertAudioToOpus(inputPath) {
+  const src = String(inputPath || '').trim();
+  if (!src || !fs.existsSync(src)) return src;
+  const out = src.replace(/\.[^.]+$/i, '') + '.opus';
+
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-i', src,
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'libopus',
+      '-b:a', '24k',
+      out
+    ], { timeout: 45000, windowsHide: true });
+    if (fs.existsSync(out)) return out;
+  } catch (err) {
+    console.warn('⚠️ ffmpeg 转 opus 失败，回退原音频:', err.message);
+  }
+  return src;
+}
+
+async function waitForVoicePipelineIdle(timeoutMs = 45000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const stats = (voiceSystem && typeof voiceSystem.getStats === 'function') ? voiceSystem.getStats() : null;
+      const speaking = !!(stats ? stats.isSpeaking : voiceSystem?.isSpeaking);
+      const queueLength = Number(stats?.queueLength || 0);
+      if (!speaking && queueLength === 0) return true;
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+
+async function sendFeishuVoiceReplyFromAssistant({ content, sessionKey, channel = '', emotion = 'calm', force = false }) {
+  const text = String(content || '').trim();
+  const inFeishu = force || isFeishuSessionKey(sessionKey) || isFeishuChannel(channel) || hasRecentFeishuContext();
+  if (!text || !inFeishu) return;
+  if (!larkUploader || !voiceSystem) return;
+  console.log(`🎵 飞书语音回传触发: channel=${channel || 'unknown'} session=${sessionKey ? 'yes' : 'no'}`);
+
+  const now = Date.now();
+  const dedupeKey = String(sessionKey || channel || 'feishu');
+  const duplicate = lastFeishuVoiceReply.sessionKey === dedupeKey
+    && lastFeishuVoiceReply.text === text
+    && (now - lastFeishuVoiceReply.at) < 8000;
+  if (duplicate) return;
+  lastFeishuVoiceReply = { sessionKey: dedupeKey, text, at: now };
+
+  feishuVoiceSerial = feishuVoiceSerial.then(async () => {
+    try {
+      const targetReady = await ensureLarkTargetReady(sessionKey || lastFeishuContext.sessionKey || '');
+      if (!targetReady) {
+        throw new Error('未找到可发送的飞书会话目标');
+      }
+      console.log(`📮 当前飞书目标: ${JSON.stringify(larkUploader.lastTarget || {})}`);
+
+      // 先后顺序：等待当前本地播报队列清空，再做飞书语音合成
+      await waitForVoicePipelineIdle(45000);
+
+      // 与本地播报保持一致：复用当前语音引擎与同一套合成策略
+      const result = await voiceSystem.synthesizeToFile(text.substring(0, 800), { emotion });
+      const sourceAudio = result?.outputFile || '';
+      if (!sourceAudio || !fs.existsSync(sourceAudio)) {
+        throw new Error('语音合成未产生可用文件');
+      }
+
+      const opusAudio = await convertAudioToOpus(sourceAudio);
+      const uploadResult = await larkUploader.uploadAudioToLark(opusAudio);
+      if (!uploadResult?.success) {
+        throw new Error(uploadResult?.error || '飞书语音发送失败');
+      }
+
+      // 清理临时文件，避免持续累积
+      try { if (fs.existsSync(sourceAudio)) fs.unlinkSync(sourceAudio); } catch {}
+      try { if (opusAudio !== sourceAudio && fs.existsSync(opusAudio)) fs.unlinkSync(opusAudio); } catch {}
+      console.log(`✅ 飞书语音回复已发送 (${uploadResult.msgType || 'audio'})`);
+    } catch (err) {
+      console.error('❌ 飞书语音回复失败:', err.message);
+    }
+  }).catch((err) => {
+    console.error('❌ 飞书语音串行队列异常:', err.message);
+  });
 }
 
 // 🛡️ 初始化全局错误处理 (最优先)
@@ -292,6 +452,15 @@ async function createWindow() {
   // 初始化所有系统
   openclawClient = new OpenClawClient();
   voiceSystem = new SmartVoiceSystem(petConfig); // 🎙️ 智能语音系统
+  try {
+    const qwen3Cfg = petConfig.get('qwen3Local') || {};
+    const ttsEngine = String(petConfig.get('ttsEngine') || '').toLowerCase();
+    if ((ttsEngine === 'qwen3' || qwen3Cfg.enabled !== false) && typeof voiceSystem.initQwen3 === 'function') {
+      await voiceSystem.initQwen3();
+    }
+  } catch (err) {
+    console.warn('⚠️ 启动阶段 Qwen3 预热失败:', err?.message || err);
+  }
   workLogger = new WorkLogger();
   messageSync = new MessageSyncSystem(openclawClient);
   desktopNotifier = new DesktopNotifier(18788);
@@ -299,6 +468,11 @@ async function createWindow() {
   petConfig.set('notifierPort', desktopNotifier.getPort()); // 保存实际端口供 wizard/bridge 使用
   screenshotSystem = new ScreenshotSystem(); // 🔥 新增
   larkUploader = new LarkUploader(); // 🔥 新增
+  await primeFeishuTarget(); // 启动时预热飞书目标，避免首条回复丢语音
+  if (feishuTargetRefreshTimer) clearInterval(feishuTargetRefreshTimer);
+  feishuTargetRefreshTimer = setInterval(() => {
+    primeFeishuTarget().catch(() => {});
+  }, 60 * 1000);
   serviceManager = new ServiceManager(); // 🔧 服务管理
   
   // 🔄 初始化模型切换器
@@ -532,6 +706,12 @@ async function createWindow() {
   desktopNotifier.on('user-message', (payload) => {
     console.log('👤 用户消息:', payload);
     if (mainWindow) {
+      if (payload?.sessionKey && larkUploader && typeof larkUploader.rememberSessionTarget === 'function') {
+        larkUploader.rememberSessionTarget(payload.sessionKey);
+      }
+      if (isFeishuSessionKey(payload?.sessionKey) || isFeishuChannel(payload?.channel) || looksLikeFeishuSender(payload?.sender)) {
+        touchFeishuContext(payload?.sessionKey || '');
+      }
       const senderName = normalizeUserSender(payload.sender, 'lark');
       mainWindow.webContents.send('new-message', {
         sender: senderName,
@@ -590,6 +770,16 @@ async function createWindow() {
         const voiceText = payload.content.substring(0, maxLength);
         voiceSystem.speak(voiceText, { emotion: payload.emotion || 'calm' });
       }
+      // 通知链路（desktop-bridge）也要支持飞书语音回传
+      if (displayContent) {
+        sendFeishuVoiceReplyFromAssistant({
+          content: displayContent,
+          sessionKey: payload?.sessionKey || '',
+          channel: payload?.channel || '',
+          emotion: payload?.emotion || 'calm',
+          force: true
+        });
+      }
       workLogger.log('message', `我回复: ${displayContent}`);
     }
   });
@@ -605,6 +795,9 @@ async function createWindow() {
     if (mainWindow) {
       if (larkUploader && typeof larkUploader.rememberSessionTarget === 'function' && msg?.sessionKey) {
         larkUploader.rememberSessionTarget(msg.sessionKey);
+      }
+      if (isFeishuSessionKey(msg?.sessionKey) || isFeishuChannel(msg?.channel) || looksLikeFeishuSender(msg?.sender)) {
+        touchFeishuContext(msg?.sessionKey || '');
       }
       const role = String(msg?.role || 'user').toLowerCase();
       if (role === 'assistant') {
@@ -629,6 +822,18 @@ async function createWindow() {
             voiceSystem.speak(text, { emotion: 'calm' });
             lastSyncAssistantSpeak = { text, at: now };
           }
+        }
+
+        // 飞书会话: 同步把 assistant 回复以语音消息发回飞书
+        // 兜底策略：即使 sessionKey 丢失/不标准，只要最近有飞书上下文也尝试回传
+        if (displayContent && (isFeishuSessionKey(msg.sessionKey) || hasRecentFeishuContext())) {
+          sendFeishuVoiceReplyFromAssistant({
+            content: displayContent,
+            sessionKey: msg.sessionKey,
+            channel: msg.channel || 'lark',
+            emotion: 'calm',
+            force: hasRecentFeishuContext()
+          });
         }
         workLogger.log('message', `同步回复: ${displayContent}`);
         console.log('🤖 同步回复:', displayContent.substring(0, 50));
@@ -2640,6 +2845,10 @@ ipcMain.handle('refresh-session', async () => {
 
 app.on('before-quit', () => {
   console.log('🧭 [app] before-quit');
+  if (feishuTargetRefreshTimer) {
+    clearInterval(feishuTargetRefreshTimer);
+    feishuTargetRefreshTimer = null;
+  }
   // 清理歌词窗口
   if (lyricsWindow && !lyricsWindow.isDestroyed()) {
     lyricsWindow.destroy();

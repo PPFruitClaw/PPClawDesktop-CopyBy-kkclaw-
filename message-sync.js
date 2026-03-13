@@ -20,7 +20,7 @@ class MessageSyncSystem extends EventEmitter {
     }
 
     _isFeishuSession(sessionKey = '') {
-        return /:feishu:/i.test(String(sessionKey || ''));
+        return /:(feishu|lark):/i.test(String(sessionKey || ''));
     }
 
     _normalizeUserSender(rawSender, channel = 'lark', sessionKey = '') {

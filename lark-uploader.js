@@ -326,7 +326,7 @@ class LarkUploader {
             const body = Buffer.concat([header, imageBuffer, footer]);
 
             const options = {
-                hostname: 'open.feishu.cn',
+                hostname: this._getApiHost(),
                 path: '/open-apis/im/v1/images',
                 method: 'POST',
                 headers: {
@@ -392,7 +392,7 @@ class LarkUploader {
             const body = Buffer.concat([header, fileBuffer, footer]);
 
             const options = {
-                hostname: 'open.feishu.cn',
+                hostname: this._getApiHost(),
                 path: '/open-apis/im/v1/files',
                 method: 'POST',
                 headers: {
@@ -536,6 +536,57 @@ class LarkUploader {
                 success: false,
                 error: err.message,
                 filepath: filepath
+            };
+        }
+    }
+
+    /**
+     * 🎵 发送飞书语音消息（优先 audio，失败回退 file）
+     */
+    async uploadAudioToLark(filepath, caption = '') {
+        try {
+            if (!fs.existsSync(filepath)) {
+                throw new Error(`语音文件不存在: ${filepath}`);
+            }
+            const filename = path.basename(filepath);
+            const fileSize = fs.statSync(filepath).size;
+            console.log(`🎵 准备发送语音: ${filename} (${(fileSize / 1024).toFixed(2)} KB)`);
+
+            // 飞书 audio 消息需 file_key，file_type 使用 opus 更兼容语音消息
+            const key = await this.uploadFile(filepath, 'opus');
+            try {
+                await this.sendMessageByKey({
+                    msgType: 'audio',
+                    key,
+                    caption
+                });
+                return {
+                    success: true,
+                    key,
+                    msgType: 'audio',
+                    target: this.lastTarget
+                };
+            } catch (audioErr) {
+                console.warn(`⚠️ audio 消息发送失败，回退 file: ${audioErr.message}`);
+                await this.sendMessageByKey({
+                    msgType: 'file',
+                    key,
+                    caption: caption || '🎵 语音回复'
+                });
+                return {
+                    success: true,
+                    key,
+                    msgType: 'file',
+                    fallbackFromAudio: true,
+                    target: this.lastTarget
+                };
+            }
+        } catch (err) {
+            console.error('❌ 发送飞书语音失败:', err.message);
+            return {
+                success: false,
+                error: err.message,
+                filepath
             };
         }
     }

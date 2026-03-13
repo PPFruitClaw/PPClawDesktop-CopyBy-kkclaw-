@@ -195,6 +195,7 @@ class SmartVoiceSystem {
 
         return {
             enabled: cfg.enabled !== false,
+            preferManagedServer: cfg.preferManagedServer !== false,
             rootDir,
             pythonPath: cfg.pythonPath || defaultPython,
             modelDir: cfg.modelDir || path.join(rootDir, 'Qwen3-TTS-12Hz-1.7B-Base'),
@@ -221,6 +222,25 @@ class SmartVoiceSystem {
             xVectorOnlyMode: cfg.xVectorOnlyMode !== false,
             serverScript: path.join(__dirname, 'voice', 'qwen3-local-server.py')
         };
+    }
+
+    async _killProcessOnPort(port) {
+        const p = Number(port);
+        if (!Number.isInteger(p) || p <= 0) return;
+        try {
+            if (process.platform === 'darwin' || process.platform === 'linux') {
+                const { stdout } = await execFileAsync('lsof', ['-tiTCP:' + String(p), '-sTCP:LISTEN'], { timeout: 3000, windowsHide: true });
+                const pids = String(stdout || '').split(/\s+/).map(s => s.trim()).filter(Boolean);
+                for (const pid of pids) {
+                    try { process.kill(Number(pid), 'SIGTERM'); } catch {}
+                }
+                if (pids.length > 0) {
+                    await new Promise((r) => setTimeout(r, 300));
+                }
+            }
+        } catch {
+            // 忽略端口清理失败，后续按正常流程启动
+        }
     }
 
     async _qwen3Health(baseUrl, timeoutMs = 1500) {
@@ -251,12 +271,18 @@ class SmartVoiceSystem {
     async _startQwen3Server() {
         const cfg = this._resolveQwen3Config();
         const baseUrl = `http://127.0.0.1:${cfg.port}`;
+        const hasExternal = await this._qwen3Health(baseUrl);
 
-        if (await this._qwen3Health(baseUrl)) {
+        if (hasExternal && !cfg.preferManagedServer) {
             this.qwen3.ready = true;
             this.qwen3.usingExternalServer = true;
             console.log(`[Voice] 🎙️ 检测到外部 Qwen3 服务: ${baseUrl}`);
             return true;
+        }
+
+        if (hasExternal && cfg.preferManagedServer) {
+            console.log('[Voice] 🔧 检测到外部 Qwen3 服务，切换为本进程托管模式');
+            await this._killProcessOnPort(cfg.port);
         }
 
         if (!cfg.enabled) throw new Error('qwen3Local.enabled=false');
@@ -472,22 +498,48 @@ class SmartVoiceSystem {
     async synthesizeWithQwen3(text, outputFile) {
         const cfg = this._resolveQwen3Config();
         const baseUrl = `http://127.0.0.1:${cfg.port}`;
-        const ready = this.qwen3.ready || await this.initQwen3();
-        if (!ready) throw new Error('Qwen3 服务不可用');
+        const payload = {
+            text,
+            outputFile,
+            language: cfg.language
+        };
+        const maxAttempts = 2;
+        let lastErr = null;
 
-        const res = await fetch(`${baseUrl}/synthesize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text,
-                outputFile,
-                language: cfg.language
-            })
-        });
-        if (!res.ok) throw new Error(`Qwen3 HTTP ${res.status}`);
-        const data = await res.json();
-        if (!data?.ok) throw new Error(data?.error || 'synthesize failed');
-        return data.outputFile || outputFile;
+        for (let i = 1; i <= maxAttempts; i++) {
+            try {
+                const ready = this.qwen3.ready || await this.initQwen3();
+                if (!ready) throw new Error('Qwen3 服务不可用');
+
+                const res = await fetch(`${baseUrl}/synthesize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error(`Qwen3 HTTP ${res.status}`);
+                const data = await res.json();
+                if (!data?.ok) throw new Error(data?.error || 'synthesize failed');
+                return data.outputFile || outputFile;
+            } catch (err) {
+                lastErr = err;
+                const errMsg = String(err?.message || err);
+                const transient = /fetch failed|ECONNRESET|ECONNREFUSED|socket hang up|network/i.test(errMsg);
+                if (i < maxAttempts && transient) {
+                    console.warn(`[Voice] ⚠️ Qwen3 合成失败(第${i}次)，尝试自愈重试: ${errMsg}`);
+                    this.qwen3.ready = false;
+                    try {
+                        await this.initQwen3();
+                    } catch (_) {
+                        // 二次重试前允许继续尝试请求
+                    }
+                    await new Promise((r) => setTimeout(r, 250));
+                    continue;
+                }
+                break;
+            }
+        }
+
+        throw lastErr || new Error('Qwen3 合成失败');
     }
 
     async speakWithQwen3(cleanText, outputFile) {
@@ -526,6 +578,26 @@ class SmartVoiceSystem {
             }
             await this._playAudioFile(audio);
         }
+    }
+
+    /**
+     * 🔊 仅合成 Edge TTS 文件（不播放）
+     */
+    async synthesizeWithEdgeTTSOnly(cleanText, voiceConfig, outputFile) {
+        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+        const textFile = path.join(this.tempDir, `tts_text_${Date.now()}.txt`);
+        fsSync.writeFileSync(textFile, cleanText, 'utf8');
+
+        const args = ['-m', 'edge_tts', '--voice', voiceConfig.voice, '--file', textFile, '--write-media', outputFile];
+        if (voiceConfig.rate !== '+0%') args.push('--rate', voiceConfig.rate);
+        if (voiceConfig.pitch !== '+0Hz') args.push('--pitch', voiceConfig.pitch);
+
+        try {
+            await execFileAsync(pythonCmd, args, { timeout: 30000, windowsHide: true });
+        } finally {
+            fsSync.unlink(textFile, () => {});
+        }
+        return outputFile;
     }
 
     async _crossfadePairWav(firstFile, secondFile, outFile, fadeMs = 90, pythonPath = null) {
@@ -1060,28 +1132,67 @@ print(outp)
      * 🔊 使用 Edge TTS 播报（回退方案，使用 execFile 避免命令注入）
      */
     async speakWithEdgeTTS(cleanText, voiceConfig, outputFile) {
-        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-        // 将文本写入临时文件，通过 --file 传入，避免 shell 注入
-        const textFile = path.join(this.tempDir, `tts_text_${Date.now()}.txt`);
-        const fsSync = require('fs');
-        fsSync.writeFileSync(textFile, cleanText, 'utf8');
-
-        const args = ['-m', 'edge_tts', '--voice', voiceConfig.voice, '--file', textFile, '--write-media', outputFile];
-
-        if (voiceConfig.rate !== '+0%') {
-            args.push('--rate', voiceConfig.rate);
-        }
-        if (voiceConfig.pitch !== '+0Hz') {
-            args.push('--pitch', voiceConfig.pitch);
-        }
-
-        try {
-            await execFileAsync(pythonCmd, args, { timeout: 30000, windowsHide: true });
-        } finally {
-            fsSync.unlink(textFile, () => {}); // 清理临时文件
-        }
-
+        await this.synthesizeWithEdgeTTSOnly(cleanText, voiceConfig, outputFile);
         await this._playAudioFile(outputFile);
+    }
+
+    /**
+     * 🎧 合成语音文件（不播放），用于飞书回传等场景
+     */
+    async synthesizeToFile(text, options = {}) {
+        const raw = String(text || '').trim();
+        if (!raw) {
+            throw new Error('文本为空，无法合成语音');
+        }
+
+        const analysis = this.analyzeContent(raw);
+        if (options.emotion) {
+            analysis.emotion = options.emotion;
+        }
+        const voiceConfig = this.selectVoice(analysis);
+        const cleanText = analysis.processedText || this.cleanTextForSpeech(raw);
+        if (!cleanText.trim()) {
+            throw new Error('清理后文本为空，无法合成语音');
+        }
+
+        const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        if (this.ttsEngine === 'qwen3') {
+            const wavFile = path.join(this.tempDir, `speech_export_${ts}.wav`);
+            try {
+                const audioFile = await this.synthesizeWithQwen3(cleanText, wavFile);
+                return { outputFile: audioFile || wavFile, engine: 'qwen3', text: cleanText };
+            } catch (qwenErr) {
+                console.warn('[Voice] ⚠️ 导出语音时 Qwen3 失败，回退到 Edge:', qwenErr.message);
+                const mp3File = path.join(this.tempDir, `speech_export_${ts}.mp3`);
+                const out = await this.synthesizeWithEdgeTTSOnly(cleanText, voiceConfig, mp3File);
+                return { outputFile: out, engine: 'edge', text: cleanText };
+            }
+        }
+
+        if (this.ttsEngine === 'minimax' && this.minimax) {
+            try {
+                const emotion = (['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'calm'].includes(analysis.emotion))
+                    ? analysis.emotion
+                    : MiniMaxTTS.detectEmotion(cleanText);
+                const mp3File = path.join(this.tempDir, `speech_export_${ts}.mp3`);
+                const out = await this.minimax.synthesize(cleanText, {
+                    voiceId: this.minimaxVoiceId,
+                    emotion,
+                    outputFile: mp3File
+                });
+                return { outputFile: out || mp3File, engine: 'minimax', text: cleanText };
+            } catch (minimaxErr) {
+                console.warn('[Voice] ⚠️ 导出语音时 MiniMax 失败，回退到 Edge:', minimaxErr.message);
+                const mp3File = path.join(this.tempDir, `speech_export_${ts}.mp3`);
+                const out = await this.synthesizeWithEdgeTTSOnly(cleanText, voiceConfig, mp3File);
+                return { outputFile: out, engine: 'edge', text: cleanText };
+            }
+        }
+
+        const mp3File = path.join(this.tempDir, `speech_export_${ts}.mp3`);
+        const out = await this.synthesizeWithEdgeTTSOnly(cleanText, voiceConfig, mp3File);
+        return { outputFile: out, engine: 'edge', text: cleanText };
     }
 
     /**
